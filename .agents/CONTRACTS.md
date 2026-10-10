@@ -305,3 +305,25 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   `reports`; exporter/eraser `ndv-reviews-reports`. Card markup on `review_foot_end` (priority 20):
   `button.ndvr-report[aria-controls]` → `form#ndvr-report-{instance}-{id}.ndvr-report-form[hidden][data-comment-id]`,
   status `#…-status[role=status]` after the form. `ndvrDisplay.reportAction`, `reportNonce`, `i18n.report*`.
+
+## My Account reviews and customer edits (RR-15, NDVR_API 9, no schema)
+- `ReviewRepository::editable( $id, $auth, $via='account' )`, `update( $id, $data, $auth )`, `apply_pending_edit( $id,
+  $expected_submitted_at )`, `discard_pending_edit( $id, $reason, $expected_submitted_at )`, `non_rating_reasons()` (frozen
+  spam, offensive, personal_info, off_topic, policy; filter `ndv-reviews/non_rating_reasons` adds only; never a rating
+  reason), `editor()` → `Reviews\ReviewEditor` (`prefill()`, `score_rows()`, `allowed_criteria()`, `window_days()`,
+  `window_closes()`). `$auth`: `user_id` or `email`; `$data`: content, title, criteria, rating (plain-rating reviews only),
+  answers + answers_present (only rendered questions change), remove_media, via (account|invite — invite skips the window,
+  RR-22 only). Errors: ndvr_edit_closed, ndvr_empty_content, ndvr_too_short, ndvr_missing_rating, ndvr_missing_answer,
+  validate_review (`$data['context'] = 'edit'`), ndvr_edit_changed, ndvr_discard_reason, ndvr_no_pending_edit.
+- Meta `_ndvr_pending_edit` {content, title, criteria|null, rating|null, answers|null, remove_media, submitted_at (GMT with
+  microseconds), via}, `_ndvr_edited_at`, `_ndvr_edit_discarded` {at, reason}. Actions `review_edit_submitted( $id, $pending )`,
+  `review_updated( $id, $changes )`, `review_edit_discarded( $id, $reason )`, `review_edit_form_fields( $review )`,
+  `moderation_edit_before_form( $comment )` (Page::render_edit, before the edit <form>). View keys `edited_at`,
+  `has_pending_edit`; `content` stays live. "Edited" label on `review_meta_after` (not filterable).
+- `Reviewable::for_account( $user_id )` → product_id => order timestamp (filter `myaccount_order_statuses`, default completed).
+- Endpoint `reviews` (filter `myaccount_endpoint`; menu after `myaccount_menu_position`, default orders), settings
+  `myaccount_enabled` (true), `edit_window_days` (30, 0–365); option `ndv_reviews_rewrite_flushed` (slug, or deleted when off).
+  Templates `myaccount-reviews.php`, `review-edit-form.php` (`Account\MyAccountReviews::edit_form( $id, $action, $cancel )`).
+  Nonces `ndvr_edit_review_{id}`, `ndvr_pending_edit_{id}` (+ hidden `ndvr_pending_submitted_at`). F7 bucket `edit_u{user_id}`
+  (20/h). F4 view `edits_pending`, row action `check_edit`. Transparency key `edits` (fact `edit_invites`). Exporter/eraser
+  `ndv-reviews-edits`.

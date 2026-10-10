@@ -880,3 +880,12 @@ new issues (remaining hits are pre-RR-13 lines). No browser check (gap 13): the 
   passes `type__in` and `post_type` like ListTable. rr-11's AC1 now accepts the code version (V_FIELDS or later).
 EVIDENCE: rr-14 44/44 (AC1–AC17 + admin view/column/row action/chip, + 14 node checks of the shipped display.js and
 .min); all 18 suites green; debug.log empty; phpcs clean on the changed files.
+
+## 2026-10-11 — RR-15 My Account reviews: built → in review
+- PRD reconciled (rev 5): API 9 (8 went to RR-11); has_reviewed() already had the whole rule; one editable() check
+  shared by the save, the Edit link and the edit view; answers merge by the rendered marker; rewrite flag also flushes on
+  turn-off. Classes: Reviews\ReviewEditor (engine), Reviews\ReviewEdits (settings, label, transparency, privacy),
+  Account\MyAccountReviews (endpoint), Moderation\PendingEdits (box, view, handler, chip, email).
+- The previous session ended mid-run (memory); resumed and finished.
+EVIDENCE: rr-15 30/30 (AC1–AC21; AC22 = core flows); all 19 suites green; debug.log empty; phpcs: no new issues
+(compared with HEAD on the touched files).

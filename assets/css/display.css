@@ -405,6 +405,38 @@ button.ndvr-bar-row.is-current .ndvr-bar-track { background: var(--ndvr-line); }
 .ndvr-review-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
 .ndvr-review-meta .ndvr-stars-display { font-size: 0.933em; }
 .ndvr-review-date { color: var(--ndvr-slate); font-size: 0.867em; font-variant-numeric: tabular-nums; }
+/* RR-15: a review the customer changed (an applied edit). */
+.ndvr-review-edited { color: var(--ndvr-slate); font-size: 0.8em; font-style: italic; }
+
+/* RR-15: My Account → Reviews. */
+.ndvr-account-reviews { display: grid; gap: 28px; font-family: var(--ndvr-font); color: var(--ndvr-ink); }
+.ndvr-account-section h2 { margin: 0 0 12px; font-size: 1.15em; }
+.ndvr-account-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.ndvr-account-item {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 12px 16px;
+	padding: 12px 14px;
+	border: 1px solid var(--ndvr-line);
+	border-radius: 10px;
+	background: var(--ndvr-paper);
+}
+.ndvr-account-thumb img { display: block; width: 56px; height: 56px; object-fit: cover; border-radius: 6px; }
+.ndvr-account-main { flex: 1 1 220px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ndvr-account-product { font-weight: 600; color: var(--ndvr-ink); }
+.ndvr-account-meta { color: var(--ndvr-slate); font-size: 0.867em; }
+.ndvr-account-action { flex: 0 0 auto; }
+.ndvr-account-empty { color: var(--ndvr-slate); margin: 0; }
+.ndvr-edit-form { display: grid; gap: 14px; max-width: 640px; }
+.ndvr-edit-form textarea,
+.ndvr-edit-form input[type="text"] { width: 100%; box-sizing: border-box; }
+.ndvr-edit-note { margin: 0; padding: 10px 12px; border-left: 3px solid var(--ndvr-accent); background: var(--ndvr-paper); }
+.ndvr-edit-media { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 12px; }
+.ndvr-edit-media legend { font-weight: 600; margin-bottom: 6px; }
+.ndvr-edit-photo { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.ndvr-edit-photo img { border-radius: 6px; object-fit: cover; }
+.ndvr-edit-actions { display: flex; align-items: center; gap: 14px; margin: 0; }
 .ndvr-review-title { margin: 0 0 6px; font-family: inherit; font-size: 1.067em; font-weight: 700; line-height: 1.35; letter-spacing: normal; text-transform: none; color: var(--ndvr-ink); }
 .ndvr-review-body { margin: 0; color: #2c313a; font-size: 1em; line-height: 1.6; }
 .ndvr-review-body p { margin: 0 0 0.6em; }

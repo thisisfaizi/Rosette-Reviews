@@ -244,6 +244,27 @@ final class Plugin {
 		);
 
 		$c->set(
+			'review_edits',
+			static function ( $c ) {
+				return new \NdvReviews\Reviews\ReviewEdits( $c->get( 'settings' ) );
+			}
+		);
+
+		$c->set(
+			'myaccount_reviews',
+			static function ( $c ) {
+				return new \NdvReviews\Account\MyAccountReviews( $c->get( 'settings' ), $c->get( 'reviews' ), $c->get( 'reviewable' ), $c->get( 'antispam' ) );
+			}
+		);
+
+		$c->set(
+			'pending_edits',
+			static function ( $c ) {
+				return new \NdvReviews\Moderation\PendingEdits( $c->get( 'reviews' ), $c->get( 'settings' ) );
+			}
+		);
+
+		$c->set(
 			'reports',
 			static function ( $c ) {
 				return new \NdvReviews\Reviews\Reports( $c->get( 'settings' ), $c->get( 'antispam' ) );
@@ -548,6 +569,9 @@ final class Plugin {
 			$this->container->get( 'renderer' ),
 			$this->container->get( 'votes' ),
 			$this->container->get( 'reports' ),
+			$this->container->get( 'review_edits' ),
+			$this->container->get( 'myaccount_reviews' ),
+			$this->container->get( 'pending_edits' ),
 			$this->container->get( 'json_ld' ),
 			$this->container->get( 'moderation_actions' ),
 			$this->container->get( 'moderation_page' ),

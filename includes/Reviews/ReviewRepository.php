@@ -40,6 +40,13 @@ class ReviewRepository {
 	private $criteria;
 
 	/**
+	 * Customer-edit engine (RR-15), created on first use.
+	 *
+	 * @var ReviewEditor|null
+	 */
+	private $editor = null;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param RatingCache        $ratings  Rating cache.
@@ -456,5 +463,113 @@ class ReviewRepository {
 		}
 
 		return 'comment' === $comment->comment_type && PostTypes::is_reviewable( (int) $comment->comment_post_ID );
+	}
+
+	// ── Customer edits (RR-15, NDVR_API 9) ───────────────────────────────
+
+	/**
+	 * The edit engine.
+	 *
+	 * @return ReviewEditor
+	 */
+	public function editor() {
+		if ( null === $this->editor ) {
+			$this->editor = new ReviewEditor( $this->ratings, $this->criteria );
+		}
+
+		return $this->editor;
+	}
+
+	/**
+	 * Whether this author may edit the review now (exists, a review,
+	 * customer-written, published or pending, theirs, and within the window
+	 * unless invited). One rule for the save, the Edit link and the edit view.
+	 *
+	 * @param int                 $comment_id Review.
+	 * @param array<string,mixed> $auth       `user_id` (int) or `email` (string, from a resolved invite).
+	 * @param string              $via        account (default) or invite (RR-22 only).
+	 * @return true|\WP_Error `ndvr_edit_closed`.
+	 */
+	public function editable( $comment_id, array $auth, $via = 'account' ) {
+		return $this->editor()->editable( $comment_id, $auth, $via );
+	}
+
+	/**
+	 * A customer's edit of their own review: the single edit path. A published
+	 * review keeps its live text and gets a pending revision for a moderator;
+	 * a review waiting for approval is updated in place.
+	 *
+	 * @param int                 $comment_id Review.
+	 * @param array<string,mixed> $data       content, title, criteria (id => score), rating (1–5, plain-rating
+	 *                                        reviews only), answers, answers_present, remove_media (int[]),
+	 *                                        via (account|invite; only RR-22's token branch passes invite).
+	 * @param array<string,mixed> $auth       `user_id` or `email`.
+	 * @return true|\WP_Error
+	 */
+	public function update( $comment_id, array $data, array $auth ) {
+		return $this->editor()->update( $comment_id, $data, $auth );
+	}
+
+	/**
+	 * Publish a pending edit. Refused with `ndvr_edit_changed` (nothing changes)
+	 * when the customer saved a newer edit than the one the moderator saw.
+	 *
+	 * @param int    $comment_id            Review.
+	 * @param string $expected_submitted_at The `submitted_at` shown to the moderator.
+	 * @return true|\WP_Error
+	 */
+	public function apply_pending_edit( $comment_id, $expected_submitted_at ) {
+		return $this->editor()->apply_pending( $comment_id, $expected_submitted_at );
+	}
+
+	/**
+	 * Discard a pending edit for a reason from non_rating_reasons(). Refused
+	 * with `ndvr_edit_changed` for a stale `submitted_at`.
+	 *
+	 * @param int    $comment_id            Review.
+	 * @param string $reason                Reason slug.
+	 * @param string $expected_submitted_at The `submitted_at` shown to the moderator.
+	 * @return true|\WP_Error
+	 */
+	public function discard_pending_edit( $comment_id, $reason, $expected_submitted_at ) {
+		return $this->editor()->discard_pending( $comment_id, $reason, $expected_submitted_at, $this->non_rating_reasons() );
+	}
+
+	/**
+	 * Reasons a moderator may give for refusing customer content (discarding an
+	 * edit; Pro RR-01 rejecting a rewarded review). None refers to the rating,
+	 * and none may: "Rating doesn't match the text" or "Low rating" are not
+	 * valid reasons (PRD-00 §2.17).
+	 *
+	 * The five core slugs are frozen (Pro copies them) and can't be removed or
+	 * relabelled; `ndv-reviews/non_rating_reasons` may add more after them.
+	 *
+	 * @return array<string,string> slug => label.
+	 */
+	public function non_rating_reasons() {
+		$core = array(
+			'spam'          => __( 'Spam or advertising', 'rosette-reviews' ),
+			'offensive'     => __( 'Offensive or abusive', 'rosette-reviews' ),
+			'personal_info' => __( 'Contains personal information', 'rosette-reviews' ),
+			'off_topic'     => __( 'Not about the product', 'rosette-reviews' ),
+			'policy'        => __( 'Breaks our review policy', 'rosette-reviews' ),
+		);
+
+		/**
+		 * Filter the non-rating reasons (add only; the five core reasons stay).
+		 * Never add a reason that refers to the rating.
+		 *
+		 * @param array<string,string> $reasons slug => label.
+		 */
+		$filtered = apply_filters( 'ndv-reviews/non_rating_reasons', $core );
+		$extra    = array();
+		foreach ( is_array( $filtered ) ? $filtered : array() as $slug => $label ) {
+			$slug = sanitize_key( (string) $slug );
+			if ( '' !== $slug && ! isset( $core[ $slug ] ) && is_string( $label ) && '' !== trim( $label ) ) {
+				$extra[ $slug ] = $label;
+			}
+		}
+
+		return $core + $extra;
 	}
 }

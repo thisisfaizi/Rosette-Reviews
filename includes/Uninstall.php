@@ -45,6 +45,7 @@ final class Uninstall {
 				'ndv_reviews_ml_strings_hash',
 				'ndv_reviews_db_version',
 				'ndv_reviews_unsubscribed',
+				'ndv_reviews_rewrite_flushed',
 				'ndv_reviews_upgrade_lock',
 				'ndv_reviews_upgrade_error',
 				'ndv_reviews_media_resweep_cursor',
@@ -77,6 +78,9 @@ final class Uninstall {
 				'_ndvr_answers',
 				'_ndvr_report_count',
 				'_ndvr_report_held',
+				'_ndvr_pending_edit',
+				'_ndvr_edited_at',
+				'_ndvr_edit_discarded',
 			),
 			'comment_meta_prefixes' => array(
 				'_ndvr_ans_',

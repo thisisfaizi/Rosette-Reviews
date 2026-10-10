@@ -563,6 +563,17 @@ class Page implements Registerable {
 			<?php if ( isset( $_GET['ndvr_error'] ) && 'rating' === sanitize_key( wp_unslash( $_GET['ndvr_error'] ) ) ) : ?>
 				<div class="notice notice-error"><p><?php esc_html_e( 'Not saved: a review needs at least one criteria rating.', 'rosette-reviews' ); ?></p></div>
 			<?php endif; ?>
+			<?php
+			/**
+			 * Fires on the Edit screen just before the edit form (RR-15). For boxes
+			 * that are their own form: a <form> nested in the edit form would be
+			 * dropped by the browser and its buttons would submit the edit form.
+			 * Boxes that save with the edit form use moderation_edit_fields.
+			 *
+			 * @param \WP_Comment $comment Review.
+			 */
+			do_action( 'ndv-reviews/moderation_edit_before_form', $comment );
+			?>
 			<form method="post">
 				<?php wp_nonce_field( 'ndvr_edit_review' ); ?>
 				<input type="hidden" name="review" value="<?php echo esc_attr( $id ); ?>" />

@@ -1,6 +1,17 @@
 # RR-15: My Account "Reviews" page
 
-Status: prd-ok (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Depends on RR-00 (F1, F4, F5, F6, F7, F8.1, F9), RR-11 (answers, optional), RR-12 (length check), RR-05 (exclusions in `Reviewable::for_order`, optional) · Raises `NDVR_API` to **8** (RR-00 F3b; planned build order, final at merge)
+Status: building (rev 5) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Depends on RR-00 (F1, F4, F5, F6, F7, F8.1, F9), RR-11 (answers), RR-12 (length check), RR-05 (exclusions in `Reviewable::for_order`) · Raises `NDVR_API` to **9** (8 went to RR-11)
+
+Rev 5 (reconciled with the code after RR-11 to RR-14, before building):
+- **API 9:** every "`NDVR_API >= 8`" below means **>= 9**: the view keys `edited_at` and `has_pending_edit`, the three edit actions, and `non_rating_reasons()`. Pro gates on 9 (Pro tasks RR-15P-1 to RR-15P-3, and Pro RR-01's discard reasons).
+- **`has_reviewed()` already ships the whole rule** (RR-00b E4: pool ids, email or `user_id`), so RR-15 only adds `for_account()`.
+- **One precondition check:** `ReviewRepository::editable( $comment_id, $auth, $via )` (true|WP_Error) runs checks 1–5 of §6. `update()` calls it first, and the account page uses it for the Edit link, the "Editing closed on" line and the edit view, so the page and the save can't disagree.
+- **Classes:** the edit logic lives in `Reviews\ReviewEditor`, which `ReviewRepository::update()`, `apply_pending_edit()` and `discard_pending_edit()` delegate to (the contract stays on `ReviewRepository`). `Reviews\ReviewEdits` holds the settings fields, the storefront "Edited" label, the `edits` transparency key and the privacy exporter and eraser (its own group, as RR-14 does). `Account\MyAccountReviews` holds the endpoint. `Moderation\PendingEdits` holds the box, view, row action, handler and chip, and sends the admin email from `review_edit_submitted`.
+- **Answers on edit:** the stored answers stay. Only the questions the edit form rendered (the `ndvr_answers_present` marker) are replaced, so an optional answer can be cleared and answers to deleted questions are kept.
+- **Stars:** the edit form uses the product form's whole-star markup. Customer-written reviews only hold whole stars, so prefilling `round( score )` changes nothing.
+- **Unpublished direct edit:** a review that was never published gets no "Edited" label (nobody saw the original).
+- **Rewrite flag:** the flag holds the slug while the endpoint is on and '' while it is off. Any mismatch flushes once, including on turn-off, so a disabled endpoint's rule is removed too.
+- **Uninstall registry:** comment meta `_ndvr_pending_edit`, `_ndvr_edited_at`, `_ndvr_edit_discarded`, and the option `ndv_reviews_rewrite_flushed`.
 
 Review findings applied: round 2 RR-22 items 2 and 3 (edit window in `update()` with the invite exemption, prefill rule, `rating` key) and shared item S8 (`has_reviewed()`); round 3 batch B items 1 (frozen reason slugs), 6 (pending-edit box outside the edit form) and 7 (`submitted_at` check on apply and discard), plus the minor notes on `for_account()` de-duplication, the `edit_u` key and `_ndvr_admin_created`.
 

@@ -277,21 +277,25 @@ class ReviewQuery {
 		$incentive = self::incentive( $id );
 
 		return array(
-			'id'           => $id,
-			'author'       => $author,
-			'date'         => $comment->comment_date,
-			'content'      => $comment->comment_content,
-			'title'        => (string) get_comment_meta( $id, '_ndvr_title', true ),
-			'overall'      => (float) get_comment_meta( $id, '_ndvr_overall_rating', true ),
-			'rating'       => (int) get_comment_meta( $id, 'rating', true ),
-			'recommend'    => (string) get_comment_meta( $id, '_ndvr_recommend', true ),
-			'verified'     => (bool) get_comment_meta( $id, '_ndvr_verified', true ),
-			'helpful_up'   => (int) get_comment_meta( $id, '_ndvr_helpful_up', true ),
-			'criteria'     => null !== $criteria_map ? ( $criteria_map[ $id ] ?? array() ) : $this->criteria_scores( $id ),
-			'media'        => null !== $media_map ? ( $media_map[ $id ] ?? array() ) : $this->media( $id ),
-			'incentive'    => $incentive,
-			'incentivized' => '' !== $incentive,
-			'answers'      => \NdvReviews\Plugin::instance()->container()->get( 'review_fields' )->answers_for_view( $id ),
+			'id'               => $id,
+			'author'           => $author,
+			'date'             => $comment->comment_date,
+			'content'          => $comment->comment_content,
+			'title'            => (string) get_comment_meta( $id, '_ndvr_title', true ),
+			'overall'          => (float) get_comment_meta( $id, '_ndvr_overall_rating', true ),
+			'rating'           => (int) get_comment_meta( $id, 'rating', true ),
+			'recommend'        => (string) get_comment_meta( $id, '_ndvr_recommend', true ),
+			'verified'         => (bool) get_comment_meta( $id, '_ndvr_verified', true ),
+			'helpful_up'       => (int) get_comment_meta( $id, '_ndvr_helpful_up', true ),
+			'criteria'         => null !== $criteria_map ? ( $criteria_map[ $id ] ?? array() ) : $this->criteria_scores( $id ),
+			'media'            => null !== $media_map ? ( $media_map[ $id ] ?? array() ) : $this->media( $id ),
+			'incentive'        => $incentive,
+			'incentivized'     => '' !== $incentive,
+			'answers'          => \NdvReviews\Plugin::instance()->container()->get( 'review_fields' )->answers_for_view( $id ),
+			// RR-15 (NDVR_API 9). `content` is always the live text: a pending
+			// revision never reaches the view model.
+			'edited_at'        => (string) get_comment_meta( $id, ReviewEditor::EDITED_META, true ),
+			'has_pending_edit' => is_array( get_comment_meta( $id, ReviewEditor::PENDING_META, true ) ),
 		);
 	}
 

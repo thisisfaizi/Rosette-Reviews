@@ -258,6 +258,85 @@ class Reviewable {
 	}
 
 	/**
+	 * Products a signed-in customer can still review, for the My Account page
+	 * (RR-15): product id => GMT timestamp of the newest order that has it.
+	 *
+	 * Products are collected across up to 50 orders and de-duplicated (with
+	 * their pools) first, so has_reviewed() runs once per distinct product.
+	 * Excluded customers and products (RR-05) and the
+	 * `ndv-reviews/reviewable_order_products` filter apply as for emails.
+	 *
+	 * @param int $user_id Customer user id.
+	 * @return array<int,int>
+	 */
+	public function for_account( $user_id ) {
+		$user_id = absint( $user_id );
+		$user    = $user_id ? get_userdata( $user_id ) : false;
+		if ( ! $user || ! function_exists( 'wc_get_orders' ) ) {
+			return array();
+		}
+
+		/**
+		 * Filter the order statuses whose products the My Account page lists.
+		 *
+		 * @param string[] $statuses Default completed only.
+		 */
+		$statuses = (array) apply_filters( 'ndv-reviews/myaccount_order_statuses', array( 'wc-completed' ) );
+		$orders   = wc_get_orders(
+			array(
+				'customer_id' => $user_id,
+				'status'      => array_values( array_filter( array_map( 'sanitize_key', $statuses ) ) ),
+				'limit'       => 50,
+				'orderby'     => 'date',
+				'order'       => 'DESC',
+			)
+		);
+
+		$candidates = array();
+		foreach ( (array) $orders as $order ) {
+			if ( ! $order instanceof \WC_Order || $this->is_excluded_customer( $order ) ) {
+				continue;
+			}
+			$this->prime_terms( $order );
+			$date = $order->get_date_created();
+			$ids  = array();
+			foreach ( $order->get_items() as $item ) {
+				if ( ! $item instanceof \WC_Order_Item_Product ) {
+					continue;
+				}
+				$product_id = (int) $item->get_product_id();
+				if ( $product_id && 'product' === get_post_type( $product_id ) && ! $this->is_excluded_product( $product_id ) ) {
+					$ids[ $product_id ] = $product_id;
+				}
+			}
+
+			/** This filter is documented in for_order(). */
+			$filtered = apply_filters( 'ndv-reviews/reviewable_order_products', array_values( $ids ), $order );
+			foreach ( is_array( $filtered ) ? array_map( 'absint', $filtered ) : array() as $product_id ) {
+				// Orders come newest first: the first date seen is the newest.
+				if ( $product_id && ! isset( $candidates[ $product_id ] ) ) {
+					$candidates[ $product_id ] = $date ? $date->getTimestamp() : 0;
+				}
+			}
+		}
+
+		$out   = array();
+		$pools = array();
+		foreach ( $candidates as $product_id => $timestamp ) {
+			$pool = \NdvReviews\Reviews\Pool::resolve_id( $product_id );
+			if ( isset( $pools[ $pool ] ) ) {
+				continue;
+			}
+			$pools[ $pool ] = true;
+			if ( ! $this->has_reviewed( (string) $user->user_email, $product_id, $user_id ) ) {
+				$out[ $product_id ] = $timestamp;
+			}
+		}
+
+		return $out;
+	}
+
+	/**
 	 * Whether a customer has already reviewed a product: the one "already
 	 * reviewed" test (PRD-00 §6). Reviews are stored on the product's pool, so
 	 * both the product and its pool are checked, matching the email, or the
