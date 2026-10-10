@@ -90,6 +90,8 @@ Free:
   where the visitor can submit; the form waits for the check; outages shown on the settings card.
 - Report a review: reason + optional note, one per reporter; email (capped), Reported view, every note on the edit
   screen, Dismiss; optional hold after N reports from signed-in shoppers or buyers (off by default, never by rating).
+- My Account → Reviews: products waiting for a review, own reviews with status; edit within a window (30 days
+  default); published reviews change only after the store applies the edit; "Edited" label; discard for non-rating reasons.
 
 Pro:
 - Incentive disclosure on every Pro surface, REST, webhooks and the Google feed (schema 2.4); rating-independent
