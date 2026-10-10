@@ -904,3 +904,11 @@ EVIDENCE: rr-14 59/59 (15 new checks; node 18/18, the old display.js fails the n
 EVIDENCE: rr-16 17/17 (AC1–AC15 incl. plain permalinks, pool, theme override, cache-key and privacy checks); AC13
 6.5 ms average for search_ids() over 5,000 seeded reviews (SQLite QA site; budget 50 ms); all 20 suites green;
 debug.log empty; phpcs: no new issues.
+
+## 2026-10-11 — RR-15 code review fixed → done (owner browser check pending)
+- Review `.agents/prd/reviews/code-RR-15.md`: 0 blockers, 6 majors, 19 minors; decisions in PRD RR-15 rev 6.
+  M1 flag dropped on (de)activation; M2 ever-published reviews always get a pending revision; M3 comment allowlist +
+  visible markup + link warning; M4 label outside the services filter; M5 reviewable products only; M6 hooks on init.
+  All minors fixed or decided (m17: keep the Edited date on erasure).
+EVIDENCE: rr-15 43/43 (13 new checks; mutation of old M2/M3 fails 2); core flows 49/49 after flow 8 learned the
+next-request re-flush; all 20 suites green; debug.log empty; phpcs clean on the changed files.

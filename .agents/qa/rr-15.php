@@ -98,6 +98,7 @@ final class NDVR_QA_RR15 {
 			$this->ac17_ac18();
 			$this->ac19_ac20();
 			$this->ac21();
+			$this->review_fixes();
 		} catch ( \Throwable $e ) {
 			$this->ok( false, 'uncaught ' . get_class( $e ) . ': ' . $e->getMessage() . ' @ ' . basename( $e->getFile() ) . ':' . $e->getLine() );
 		}
@@ -799,7 +800,7 @@ final class NDVR_QA_RR15 {
 		$flat  = wp_json_encode( $ex['data'] );
 		$this->ok( false !== strpos( $flat, 'Proposed edit' ) && false !== strpos( $flat, 'A proposed edit for the privacy test.' ) && false !== strpos( $flat, 'Edited on' ), 'AC17: the export lists "Proposed edit" and "Edited on"' );
 		$edits->erase( $email );
-		$this->ok( ! is_array( get_comment_meta( $id, ReviewEditor::PENDING_META, true ) ) && '' === get_comment_meta( $id, ReviewEditor::EDITED_META, true ) && '' === get_comment_meta( $id, ReviewEditor::DISCARDED_META, true ), 'AC17: erase removes the three meta keys' );
+		$this->ok( ! is_array( get_comment_meta( $id, ReviewEditor::PENDING_META, true ) ) && '2026-03-12 10:00:00' === get_comment_meta( $id, ReviewEditor::EDITED_META, true ) && '' === get_comment_meta( $id, ReviewEditor::DISCARDED_META, true ), 'AC17 (rev 6, m17): erase removes the proposed edit and the discard note; the "Edited" date stays' );
 
 		$t     = $this->c()->get( 'transparency' );
 		$tail  = ' The original stays up until we check the change, and a changed review is marked \'Edited\'.';
@@ -879,6 +880,190 @@ final class NDVR_QA_RR15 {
 		$with = $repo->non_rating_reasons();
 		remove_filter( 'ndv-reviews/non_rating_reasons', $f );
 		$this->ok( array( 'spam', 'offensive', 'personal_info', 'off_topic', 'policy' ) === array_keys( $base ) && 'Offensive or abusive' === $base['offensive'] && array( 'spam', 'offensive', 'personal_info', 'off_topic', 'policy', 'duplicate' ) === array_keys( $with ) && (int) NDVR_API >= 9, 'AC21: the five frozen reasons in order; a filter can\'t remove spam and adds duplicate after them; NDVR_API is 9' );
+	}
+
+	/**
+	 * Code review RR-15 (reviews/code-RR-15.md): M1–M6 and the minors with
+	 * runtime evidence, plus the answers path.
+	 *
+	 * @return void
+	 */
+	private function review_fixes() {
+		$repo = $this->c()->get( 'reviews' );
+		$u    = $this->user();
+
+		// M1: activation and deactivation drop the rewrite flag.
+		update_option( MyAccountReviews::FLAG, 'reviews', true );
+		\NdvReviews\Deactivator::deactivate();
+		$off = get_option( MyAccountReviews::FLAG, 'gone' );
+		update_option( MyAccountReviews::FLAG, 'reviews', true );
+		\NdvReviews\Activator::activate();
+		$on = get_option( MyAccountReviews::FLAG, 'gone' );
+		$this->c()->get( 'myaccount_reviews' )->maybe_flush();
+		$this->ok( 'gone' === $off && 'gone' === $on && 'reviews' === get_option( MyAccountReviews::FLAG ), 'M1: deactivation and activation drop the flag, so the next booted request flushes and sets it again' );
+
+		// M2: published, then held → the edit is a pending revision; Apply labels it.
+		$p  = $this->product( 'Held' );
+		$id = $this->review( $p, $u );
+		wp_set_comment_status( $id, 'hold' );
+		$this->customer_post( $u, $id, array( 'ndvr_content' => 'Changed while the review was held for checking.' ) );
+		clean_comment_cache( $id );
+		$pending = get_comment_meta( $id, ReviewEditor::PENDING_META, true );
+		$live    = get_comment( $id )->comment_content;
+		$repo->apply_pending_edit( $id, is_array( $pending ) ? $pending['submitted_at'] : '' );
+		wp_set_comment_status( $id, 'approve' );
+		$this->ok( is_array( $pending ) && 'The original review text, long enough to pass.' === $live && false !== strpos( $this->card( $id ), 'ndvr-review-edited' ), 'M2: a held review that was published gets a pending revision (live text unchanged), and is marked Edited after Apply' );
+
+		// M3: the comment allowlist; the box shows the markup and flags a new link.
+		$id = $this->review( $p, $u );
+		$this->customer_post( $u, $id, array( 'ndvr_content' => 'See <a href="https://spam.example/">this deal</a> <img src="x.png"> <script>x()</script> ok.' ) );
+		$pending = get_comment_meta( $id, ReviewEditor::PENDING_META, true );
+		$_GET    = array(
+			'page'        => \NdvReviews\Moderation\Page::PAGE_SLUG,
+			'ndvr_action' => 'edit',
+			'review'      => (string) $id,
+		);
+		ob_start();
+		$this->c()->get( 'moderation_page' )->render();
+		$screen = (string) ob_get_clean();
+		$_GET   = array();
+		$stored = is_array( $pending ) ? (string) $pending['content'] : '';
+		$this->ok( false !== strpos( $stored, '<a href="https://spam.example/">' ) && false === strpos( $stored, '<img' ) && false === strpos( $stored, '<script' ) && false !== strpos( $screen, '&lt;a href=&quot;https://spam.example/&quot;&gt;' ) && false !== strpos( $screen, 'The edit adds a link.' ), 'M3: the edit keeps only comment markup (no img/script); the box shows the link as written and warns about it' );
+
+		// M4: the label isn't one of the filterable services.
+		$this->ok( false !== has_action( 'ndv-reviews/review_meta_after', array( \NdvReviews\Reviews\ReviewEdits::class, 'render_edited' ) ), 'M4: the "Edited" label is hooked by Plugin::boot(), outside ndv-reviews/services' );
+
+		// M5, m16: only reviewable products; an empty status filter doesn't mean "any".
+		$draft  = $this->product( 'Draft' );
+		$closed = $this->product( 'Closed' );
+		$open   = $this->product( 'Open' );
+		$this->order( $u, array( $draft, $closed, $open ) );
+		$this->order( $u, array( $this->product( 'Cancelled' ) ), 'cancelled' );
+		wp_update_post(
+			array(
+				'ID'          => $draft,
+				'post_status' => 'draft',
+			)
+		);
+		wp_update_post(
+			array(
+				'ID'             => $closed,
+				'comment_status' => 'closed',
+			)
+		);
+		$empty = static function () {
+			return array();
+		};
+		add_filter( 'ndv-reviews/myaccount_order_statuses', $empty );
+		$list = $this->c()->get( 'reviewable' )->for_account( $u );
+		remove_filter( 'ndv-reviews/myaccount_order_statuses', $empty );
+		$this->ok( isset( $list[ $open ] ) && ! isset( $list[ $draft ] ) && ! isset( $list[ $closed ] ) && 1 === count( $list ), 'M5/m16: drafts and products with reviews closed aren\'t listed; an empty status filter falls back to completed orders' );
+
+		// M6: a slug from a theme binds the endpoint hooks on init.
+		$slug = static function () {
+			return 'my-reviews';
+		};
+		add_filter( 'ndv-reviews/myaccount_endpoint', $slug );
+		$this->c()->get( 'myaccount_reviews' )->bind_endpoint();
+		$bound = has_action( 'woocommerce_account_my-reviews_endpoint' ) && has_filter( 'woocommerce_endpoint_my-reviews_title' );
+		remove_filter( 'ndv-reviews/myaccount_endpoint', $slug );
+		$this->ok( $bound && false !== has_action( 'init', array( $this->c()->get( 'myaccount_reviews' ), 'bind_endpoint' ) ), 'M6: the slug-named hooks are bound on init, after a theme could change the slug' );
+
+		// Email auth (invites) and the guest case.
+		$guest = $this->review(
+			$p,
+			0,
+			array(
+				'email'  => 'rr15-guest-' . wp_generate_password( 4, false, false ) . '@example.invalid',
+				'author' => 'Guest',
+			)
+		);
+		$ge    = get_comment( $guest )->comment_author_email;
+		$crit  = array_fill_keys( array_keys( $this->rows( $guest ) ), 4 );
+		$ok    = $repo->update( $guest, array( 'content' => 'Edited by the guest who wrote it.', 'criteria' => $crit ), array( 'email' => strtoupper( $ge ) ) );
+		$no    = $repo->update( $guest, array( 'content' => 'Someone else with another email.', 'criteria' => $crit ), array( 'email' => 'nobody@example.invalid' ) );
+		$zero  = $repo->update( $guest, array( 'content' => 'A logged-in user 0 is nobody.', 'criteria' => $crit ), array( 'user_id' => 0 ) );
+		$this->ok( true === $ok && is_wp_error( $no ) && is_wp_error( $zero ), 'Email auth: the review\'s own email (any case) may edit; another email or user 0 may not' );
+
+		// m2: caps; m15: no Apply in the trash.
+		$id   = $this->review( $p, $u );
+		$long = $repo->update( $id, array( 'content' => str_repeat( 'a', ReviewEditor::CONTENT_MAX + 1 ), 'criteria' => array_fill_keys( array_keys( $this->rows( $id ) ), 4 ) ), array( 'user_id' => $u ) );
+		$this->customer_post( $u, $id, array( 'ndvr_content' => 'A fine edit that will meet the trash.' ) );
+		$pend = get_comment_meta( $id, ReviewEditor::PENDING_META, true );
+		wp_trash_comment( $id );
+		$trashed = $repo->apply_pending_edit( $id, is_array( $pend ) ? $pend['submitted_at'] : '' );
+		wp_untrash_comment( $id );
+		$this->ok( is_wp_error( $long ) && 'ndvr_too_long' === $long->get_error_code() && is_wp_error( $trashed ) && 'ndvr_edit_closed' === $trashed->get_error_code(), 'm2/m15: an over-long text is refused; an edit can\'t be applied to a trashed review' );
+
+		// m6: a failed save keeps what was typed.
+		$this->set( array( 'min_review_length' => 60 ) );
+		$this->customer_post( $u, $id, array( 'ndvr_content' => 'Short but precious words.' ) );
+		$this->set( array( 'min_review_length' => 0 ) );
+		$form = $this->account( $u, $id );
+		$this->ok( false !== strpos( $form, 'Short but precious words.' ) && false !== strpos( $form, 'Edit your review of' ), 'm6/m13: after a refused save the form shows what the customer typed, under a heading naming the product' );
+
+		// m7: one email per review an hour.
+		$mails = 0;
+		$spy   = static function ( $pre ) use ( &$mails ) {
+			++$mails;
+			return true;
+		};
+		add_filter( 'pre_wp_mail', $spy, 0 );
+		$id2 = $this->review( $p, $u );
+		$this->customer_post( $u, $id2, array( 'ndvr_content' => 'First save of an edit for the email test.' ) );
+		$this->customer_post( $u, $id2, array( 'ndvr_content' => 'Second save of an edit for the email test.' ) );
+		remove_filter( 'pre_wp_mail', $spy, 0 );
+		$this->ok( 1 === $mails, 'm7: two saves of an edit send the store one email (' . $mails . ')' );
+
+		// m14: a second Apply reads as applied.
+		$pend = get_comment_meta( $id2, ReviewEditor::PENDING_META, true );
+		$this->admin_post( $id2, 'apply', array( PendingEdits::AT_FIELD => $pend['submitted_at'] ) );
+		$this->admin_post( $id2, 'apply', array( PendingEdits::AT_FIELD => $pend['submitted_at'] ) );
+		$this->ok( false !== strpos( $this->redirect, PendingEdits::NOTICE . '=applied' ), 'm14: a double-clicked Apply still reports "applied"' );
+
+		// Answers path (RR-11) with a question on; m9: inactive questions stay.
+		remove_filter( 'ndv-reviews/max_review_fields', '__return_zero' );
+		$fields = $this->c()->get( 'review_fields' );
+		$q1     = $fields->insert(
+			array(
+				'label' => 'RR15 fit ' . wp_generate_password( 4, false, false ),
+				'type'  => 'text',
+			)
+		);
+		$q2     = $fields->insert(
+			array(
+				'label'  => 'RR15 old ' . wp_generate_password( 4, false, false ),
+				'type'   => 'text',
+				'status' => 'inactive',
+			)
+		);
+		$id3    = $this->review( $p, $u );
+		$fields->save_answers( $id3, array( (int) $q2 => 'kept answer' ) );
+		$this->customer_post(
+			$u,
+			$id3,
+			array(
+				'ndvr_content'         => 'Answering the fit question in my edit.',
+				'ndvr_answers'         => array(
+					(int) $q1 => 'Runs small',
+					(int) $q2 => 'changed?',
+				),
+				'ndvr_answers_present' => (int) $q1 . ',' . (int) $q2,
+			)
+		);
+		$pend = get_comment_meta( $id3, ReviewEditor::PENDING_META, true );
+		$repo->apply_pending_edit( $id3, is_array( $pend ) ? $pend['submitted_at'] : '' );
+		$stored = $fields->stored( $id3 );
+		$fields->delete( (int) $q1 );
+		$fields->delete( (int) $q2 );
+		add_filter( 'ndv-reviews/max_review_fields', '__return_zero' );
+		$this->ok( 'Runs small' === ( $stored[ (int) $q1 ] ?? '' ) && 'kept answer' === ( $stored[ (int) $q2 ] ?? '' ), 'Answers: an edit answers an active question on Apply; an inactive question\'s answer is untouched (m9)' );
+
+		// m3: the window sentence in the singular.
+		$this->set( array( 'edit_window_days' => 1 ) );
+		$s1 = (array) $this->c()->get( 'transparency' )->sentences( $p );
+		$this->set( array( 'edit_window_days' => 30 ) );
+		$this->ok( 0 === strpos( (string) ( $s1['edits'] ?? '' ), 'Customers can edit their review for 1 day after posting it.' ), 'm3: a one-day window reads "for 1 day"' );
 	}
 
 	/**

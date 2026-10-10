@@ -281,11 +281,15 @@ class Reviewable {
 		 *
 		 * @param string[] $statuses Default completed only.
 		 */
-		$statuses = (array) apply_filters( 'ndv-reviews/myaccount_order_statuses', array( 'wc-completed' ) );
-		$orders   = wc_get_orders(
+		$statuses = array_values( array_filter( array_map( 'sanitize_key', (array) apply_filters( 'ndv-reviews/myaccount_order_statuses', array( 'wc-completed' ) ) ) ) );
+		if ( ! $statuses ) {
+			// An empty status list would mean "any status" to wc_get_orders().
+			$statuses = array( 'wc-completed' );
+		}
+		$orders = wc_get_orders(
 			array(
 				'customer_id' => $user_id,
-				'status'      => array_values( array_filter( array_map( 'sanitize_key', $statuses ) ) ),
+				'status'      => $statuses,
 				'limit'       => 50,
 				'orderby'     => 'date',
 				'order'       => 'DESC',
@@ -325,6 +329,10 @@ class Reviewable {
 		foreach ( $candidates as $product_id => $timestamp ) {
 			$pool = \NdvReviews\Reviews\Pool::resolve_id( $product_id );
 			if ( isset( $pools[ $pool ] ) ) {
+				continue;
+			}
+			// Only products the form will take a review for (published, open).
+			if ( 'publish' !== get_post_status( $product_id ) || ! comments_open( $product_id ) || ( $pool !== $product_id && ( 'publish' !== get_post_status( $pool ) || ! comments_open( $pool ) ) ) ) {
 				continue;
 			}
 			$pools[ $pool ] = true;

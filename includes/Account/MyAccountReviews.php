@@ -30,6 +30,8 @@ class MyAccountReviews implements Registerable {
 	const FLAG       = 'ndv_reviews_rewrite_flushed';
 	const SAVE_FIELD = 'ndvr_edit_review_save';
 	const RATE_MAX   = 20;
+	const LIST_MAX   = 50;
+	const DRAFT_TTL  = 600;
 
 	/**
 	 * Settings.
@@ -84,10 +86,21 @@ class MyAccountReviews implements Registerable {
 		add_action( 'init', array( $this, 'maybe_flush' ), 999 );
 		add_filter( 'woocommerce_get_query_vars', array( $this, 'query_vars' ) );
 		add_filter( 'woocommerce_account_menu_items', array( $this, 'menu_items' ), 20 );
-		add_filter( 'woocommerce_endpoint_' . self::endpoint() . '_title', array( $this, 'title' ) );
-		add_action( 'woocommerce_account_' . self::endpoint() . '_endpoint', array( $this, 'render' ) );
+		// The slug filter may live in a theme, which loads after plugins: bind
+		// the slug-named hooks on init.
+		add_action( 'init', array( $this, 'bind_endpoint' ), 0 );
 		add_action( 'template_redirect', array( $this, 'handle_save' ), 5 );
 		add_action( 'wp_enqueue_scripts', array( $this, 'assets' ) );
+	}
+
+	/**
+	 * Hooks named after the endpoint slug.
+	 *
+	 * @return void
+	 */
+	public function bind_endpoint() {
+		add_filter( 'woocommerce_endpoint_' . self::endpoint() . '_title', array( $this, 'title' ) );
+		add_action( 'woocommerce_account_' . self::endpoint() . '_endpoint', array( $this, 'render' ) );
 	}
 
 	/**
@@ -130,7 +143,7 @@ class MyAccountReviews implements Registerable {
 		if ( '' === $desired ) {
 			delete_option( self::FLAG );
 		} else {
-			update_option( self::FLAG, $desired, false );
+			update_option( self::FLAG, $desired, true );
 		}
 	}
 
@@ -267,8 +280,9 @@ class MyAccountReviews implements Registerable {
 			array(
 				'user_id'  => $user_id,
 				'type__in' => array( 'review' ),
+				'parent'   => 0,
 				'status'   => 'all',
-				'number'   => 50,
+				'number'   => self::LIST_MAX,
 				'orderby'  => 'comment_date_gmt',
 				'order'    => 'DESC',
 			)
@@ -292,6 +306,7 @@ class MyAccountReviews implements Registerable {
 			array(
 				'waiting' => $waiting,
 				'mine'    => $mine,
+				'more'    => count( $mine ) >= self::LIST_MAX,
 			)
 		);
 		echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- the template escapes.
@@ -316,7 +331,23 @@ class MyAccountReviews implements Registerable {
 			return;
 		}
 
-		echo self::edit_form( $id, self::url( $id ), self::url() ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- the template escapes.
+		$comment = get_comment( $id );
+		printf(
+			'<h2 class="ndvr-edit-heading">%s</h2>',
+			esc_html(
+				sprintf(
+					/* translators: %s: product name. */
+					__( 'Edit your review of %s', 'rosette-reviews' ),
+					get_the_title( (int) $comment->comment_post_ID )
+				)
+			)
+		);
+		$draft_key = self::draft_key( $user_id, $id );
+		$draft     = get_transient( $draft_key );
+		if ( false !== $draft ) {
+			delete_transient( $draft_key );
+		}
+		echo self::edit_form( $id, self::url( $id ), self::url(), is_array( $draft ) ? $draft : array() ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- the template escapes.
 	}
 
 	/**
@@ -325,13 +356,14 @@ class MyAccountReviews implements Registerable {
 	 * @param int    $id         Review.
 	 * @param string $action     Form action URL.
 	 * @param string $cancel_url Cancel link.
+	 * @param array  $draft      What the customer typed before a failed save (wins over the stored values).
 	 * @return string
 	 */
-	public static function edit_form( $id, $action, $cancel_url ) {
+	public static function edit_form( $id, $action, $cancel_url, array $draft = array() ) {
 		$c       = \NdvReviews\Plugin::instance()->container();
 		$editor  = $c->get( 'reviews' )->editor();
 		$comment = get_comment( $id );
-		$values  = $editor->prefill( $id );
+		$values  = array_merge( $editor->prefill( $id ), array_intersect_key( $draft, array_flip( array( 'content', 'title', 'criteria', 'rating', 'answers', 'remove_media' ) ) ) );
 		$rows    = $editor->score_rows( $id );
 
 		return View::render(
@@ -408,6 +440,19 @@ class MyAccountReviews implements Registerable {
 		$was_published = 'approved' === wp_get_comment_status( $id );
 		$result        = $this->reviews->update( $id, $data, array( 'user_id' => $user_id ) );
 		if ( is_wp_error( $result ) ) {
+			// Keep what was typed for the form it returns to (m6).
+			set_transient(
+				self::draft_key( $user_id, $id ),
+				array(
+					'content'      => wp_kses( (string) $data['content'], 'pre_comment_content' ),
+					'title'        => sanitize_text_field( (string) $data['title'] ),
+					'criteria'     => array_map( 'floatval', (array) $data['criteria'] ),
+					'rating'       => isset( $data['rating'] ) ? absint( $data['rating'] ) : 0,
+					'answers'      => array_map( 'sanitize_text_field', array_filter( (array) $data['answers'], 'is_scalar' ) ),
+					'remove_media' => $data['remove_media'],
+				),
+				self::DRAFT_TTL
+			);
 			$this->leave( $result->get_error_message(), 'error', $back );
 			return;
 		}
@@ -419,6 +464,17 @@ class MyAccountReviews implements Registerable {
 			'success',
 			self::url()
 		);
+	}
+
+	/**
+	 * Transient key of a customer's unsaved edit.
+	 *
+	 * @param int $user_id User.
+	 * @param int $id      Review.
+	 * @return string
+	 */
+	private static function draft_key( $user_id, $id ) {
+		return 'ndvr_edit_draft_' . absint( $user_id ) . '_' . absint( $id );
 	}
 
 	/**

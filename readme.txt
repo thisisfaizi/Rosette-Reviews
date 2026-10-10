@@ -54,7 +54,7 @@ Rosette Reviews replaces the default WooCommerce reviews tab with a review secti
 * Reminder results: the request log records when a customer opened the review link and when they left a review, so the dashboard can show how many orders that got a request led to a review. Two optional extras are off by default: UTM tags on the review link, and a 1×1 image that counts email opens. The image is a form of tracking that some privacy laws require consent for; mention it in your privacy policy if you turn it on. Erasing a customer's personal data cancels any review request still waiting to be sent to them.
 * Checkout consent: if you turn it on, Rosette Reviews saves the customer's answer, the time and the checkbox wording on the order. They are included in WordPress personal data exports and erasures.
 * Review reports: a report stores the reason, the optional note and, for a signed-in shopper, their account id. Their reports are included in personal data exports and removed by erasure. Reports from guests are stored with a one-way hash of their IP address and are deleted with the review, or when the plugin's data is removed on uninstall.
-* Review edits: edits a customer makes to a review are kept until a moderator applies or discards them. The proposed edit and the date an edit was applied are included in personal data exports and removed by erasure.
+* Review edits: edits a customer makes to a review are kept until a moderator applies or discards them. The proposed edit and the date an edit was applied are included in personal data exports; erasure removes the proposed edit, while the "Edited" date stays with the review so a changed review still says so.
 
 = Shortcodes =
 
@@ -105,6 +105,10 @@ They stay where they are and keep showing. Use Rosette Reviews → Import / Expo
 = Can customers review without an account? =
 
 Yes, if guest reviews are allowed in Settings. Customers who follow a reminder email link never need to log in. You can also require a verified purchase using WooCommerce's own "Reviews can only be left by verified owners" setting.
+
+= Where do customers see and edit their reviews? =
+
+In My Account → Reviews (the address ends in /my-account/reviews/). If your site already has a page named "reviews" under another page, change the address with the `ndv-reviews/myaccount_endpoint` filter, then save Settings → Permalinks once.
 
 = Why are reminder emails not sending? =
 

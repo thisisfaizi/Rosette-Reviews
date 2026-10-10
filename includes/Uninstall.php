@@ -82,6 +82,7 @@ final class Uninstall {
 				'_ndvr_pending_edit',
 				'_ndvr_edited_at',
 				'_ndvr_edit_discarded',
+				'_ndvr_published_once',
 			),
 			'comment_meta_prefixes' => array(
 				'_ndvr_ans_',

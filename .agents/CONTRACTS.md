@@ -342,3 +342,10 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   `status_text()`, `highlight()` on `review_body_html` / `review_title_html` (`<mark class="ndvr-mark">`).
 - AJAX `ndvr_list_reviews` param `q`: rate bucket `list` (filter `ndv-reviews/search_rate_limit_per_hour` 60; 429), product
   required (400), ignored below the minimum; payload adds `total`, `q`, `status`. GET `ndvr_q` on the product page (no JS).
+- RR-15 rev 6: `has_pending_edit` is public in every view model (a bool, never the text). A review that has ever been
+  public (`_ndvr_published_once`, set on approval/insert) gets a pending revision even while held. Edits keep the comment
+  allowlist (`wp_kses( …, 'pre_comment_content' )`); content ≤ 65,525 bytes, title ≤ 150. `apply`/`update` return
+  true|WP_Error (nothing written on failure); `ndvr_too_long`, `ndvr_edit_closed` for spam/trash on apply. The "Edited"
+  label is hooked in Plugin::boot() (not removable); the eraser keeps `_ndvr_edited_at`. Endpoint hooks bind on `init` 0
+  (`bind_endpoint()`); the flag is autoloaded and deleted on (de)activation. Admin email at most once per review per hour
+  (transient `ndvr_edit_mail_{id}`); customer draft after a failed save in `ndvr_edit_draft_{user}_{id}` (10 min).

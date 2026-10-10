@@ -204,8 +204,8 @@ class PendingEdits implements Registerable {
 			),
 			array(
 				__( 'Review', 'rosette-reviews' ),
-				wp_strip_all_tags( (string) $comment->comment_content ),
-				wp_strip_all_tags( isset( $pending['content'] ) ? (string) $pending['content'] : '' ),
+				(string) $comment->comment_content,
+				isset( $pending['content'] ) ? (string) $pending['content'] : '',
 			),
 		);
 		if ( isset( $pending['criteria'] ) && is_array( $pending['criteria'] ) ) {
@@ -216,10 +216,16 @@ class PendingEdits implements Registerable {
 		if ( isset( $pending['answers'] ) && is_array( $pending['answers'] ) ) {
 			$rows[] = array( __( 'Answers', 'rosette-reviews' ), self::answers_text( $fields->stored( $id ), $labels ), self::answers_text( $pending['answers'], $labels ) );
 		}
+		$remove = array();
 		if ( ! empty( $pending['remove_media'] ) ) {
-			/* translators: %s: number of photos. */
-			$rows[] = array( __( 'Photos', 'rosette-reviews' ), '', sprintf( _n( 'Remove %s photo', 'Remove %s photos', count( (array) $pending['remove_media'] ), 'rosette-reviews' ), number_format_i18n( count( (array) $pending['remove_media'] ) ) ) );
+			$ids = array_map( 'intval', (array) $pending['remove_media'] );
+			foreach ( \NdvReviews\Plugin::instance()->container()->get( 'review_query' )->media( $id, 'any' ) as $m ) {
+				if ( in_array( (int) $m['id'], $ids, true ) ) {
+					$remove[] = $m;
+				}
+			}
 		}
+		$adds_link = isset( $pending['content'] ) && preg_match( '/<a\s/i', (string) $pending['content'] ) && substr_count( strtolower( (string) $pending['content'] ), '<a ' ) > substr_count( strtolower( (string) $comment->comment_content ), '<a ' );
 		$submitted = isset( $pending['submitted_at'] ) ? (string) $pending['submitted_at'] : '';
 		$time      = strtotime( substr( $submitted, 0, 19 ) . ' UTC' );
 		?>
@@ -233,6 +239,9 @@ class PendingEdits implements Registerable {
 					?>
 				</p>
 			<?php endif; ?>
+			<?php if ( $adds_link ) : ?>
+				<div class="notice notice-warning inline"><p><?php esc_html_e( 'The edit adds a link. Check where it goes before you apply it.', 'rosette-reviews' ); ?></p></div>
+			<?php endif; ?>
 			<table class="widefat striped" style="margin:12px 0;">
 				<thead><tr><th scope="col"></th><th scope="col"><?php esc_html_e( 'Now', 'rosette-reviews' ); ?></th><th scope="col"><?php esc_html_e( 'Proposed', 'rosette-reviews' ); ?></th></tr></thead>
 				<tbody>
@@ -243,6 +252,20 @@ class PendingEdits implements Registerable {
 							<td><?php echo nl2br( esc_html( $row[2] ) ); ?></td>
 						</tr>
 					<?php endforeach; ?>
+					<?php if ( $remove ) : ?>
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Photos to remove', 'rosette-reviews' ); ?></th>
+							<td colspan="2">
+								<?php foreach ( $remove as $m ) : ?>
+									<?php if ( 'image' === $m['type'] && '' !== (string) $m['thumb'] ) : ?>
+										<img src="<?php echo esc_url( $m['thumb'] ); ?>" alt="" width="64" height="64" style="object-fit:cover;border-radius:4px;margin:0 6px 6px 0;" />
+									<?php else : ?>
+										<a href="<?php echo esc_url( $m['url'] ); ?>" target="_blank" rel="noopener"><?php esc_html_e( 'Video', 'rosette-reviews' ); ?><span class="screen-reader-text"> <?php esc_html_e( '(opens in a new tab)', 'rosette-reviews' ); ?></span></a>
+									<?php endif; ?>
+								<?php endforeach; ?>
+							</td>
+						</tr>
+					<?php endif; ?>
 				</tbody>
 			</table>
 			<form method="post" action="<?php echo esc_url( self::edit_url( $id ) ); ?>">
@@ -250,6 +273,7 @@ class PendingEdits implements Registerable {
 				<input type="hidden" name="review" value="<?php echo esc_attr( (string) $id ); ?>" />
 				<input type="hidden" name="<?php echo esc_attr( self::AT_FIELD ); ?>" value="<?php echo esc_attr( $submitted ); ?>" />
 				<p class="description"><?php esc_html_e( 'Apply or discard an edit by the same rules you use for new reviews. A change of rating is not a reason to discard it.', 'rosette-reviews' ); ?></p>
+				<p class="description"><?php esc_html_e( 'Applying replaces the title, text, ratings and answers with the customer\'s version, including any change you made yourself since they saved it.', 'rosette-reviews' ); ?></p>
 				<p>
 					<button type="submit" class="button button-primary" name="<?php echo esc_attr( self::DO_FIELD ); ?>" value="apply"><?php esc_html_e( 'Apply edit', 'rosette-reviews' ); ?></button>
 				</p>
@@ -282,6 +306,8 @@ class PendingEdits implements Registerable {
 			'changed'   => array( 'warning', __( 'The customer changed this edit again. Check the new version.', 'rosette-reviews' ) ),
 			'reason'    => array( 'error', __( 'Choose a reason for discarding the edit.', 'rosette-reviews' ) ),
 			'gone'      => array( 'warning', __( 'There is no edit waiting for this review.', 'rosette-reviews' ) ),
+			'closed'    => array( 'error', __( 'This review is in the spam or trash, so the edit can\'t be applied.', 'rosette-reviews' ) ),
+			'failed'    => array( 'error', __( 'The review could not be saved. The edit is still waiting.', 'rosette-reviews' ) ),
 		);
 		if ( isset( $messages[ $code ] ) ) {
 			printf( '<div class="notice notice-%1$s inline"><p>%2$s</p></div>', esc_attr( $messages[ $code ][0] ), esc_html( $messages[ $code ][1] ) );
@@ -348,8 +374,16 @@ class PendingEdits implements Registerable {
 			'ndvr_edit_changed'    => 'changed',
 			'ndvr_discard_reason'  => 'reason',
 			'ndvr_no_pending_edit' => 'gone',
+			'ndvr_edit_closed'     => 'closed',
 		);
-		$code  = is_wp_error( $result ) ? ( $codes[ $result->get_error_code() ] ?? 'gone' ) : ( 'discard' === $do ? 'discarded' : 'applied' );
+		$code  = is_wp_error( $result ) ? ( $codes[ $result->get_error_code() ] ?? 'failed' ) : ( 'discard' === $do ? 'discarded' : 'applied' );
+		// A second click on Apply: the first one just published the edit.
+		if ( 'gone' === $code && 'apply' === $do ) {
+			$edited = strtotime( (string) get_comment_meta( $id, ReviewEditor::EDITED_META, true ) . ' UTC' );
+			if ( $edited && time() - $edited < MINUTE_IN_SECONDS ) {
+				$code = 'applied';
+			}
+		}
 
 		wp_safe_redirect( self::edit_url( $id, array( self::NOTICE => $code ) ) );
 		exit;
@@ -399,6 +433,12 @@ class PendingEdits implements Registerable {
 		if ( 'off' === (string) $this->settings->get( 'admin_notify', 'pending' ) ) {
 			return;
 		}
+		// One email per review an hour, however often the customer saves.
+		$once = 'ndvr_edit_mail_' . absint( $comment_id );
+		if ( false !== get_transient( $once ) ) {
+			return;
+		}
+		set_transient( $once, 1, HOUR_IN_SECONDS );
 		$comment = get_comment( (int) $comment_id );
 		$to      = sanitize_email( (string) $this->settings->get( 'admin_notify_email', '' ) );
 		if ( ! is_email( $to ) ) {

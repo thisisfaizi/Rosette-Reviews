@@ -38,7 +38,7 @@ $ndvr_star_set = static function ( $name, $legend, $current, $id_base ) {
 	?>
 	<fieldset class="ndvr-criterion">
 		<legend class="ndvr-criterion-label"><?php echo esc_html( $legend ); ?></legend>
-		<div class="ndvr-stars" role="radiogroup" aria-label="<?php echo esc_attr( $legend ); ?>">
+		<div class="ndvr-stars">
 			<?php for ( $ndvr_star = 5; $ndvr_star >= 1; $ndvr_star-- ) : ?>
 				<?php $ndvr_fid = $id_base . '-s' . $ndvr_star; ?>
 				<input class="ndvr-star-input" type="radio" id="<?php echo esc_attr( $ndvr_fid ); ?>" name="<?php echo esc_attr( $name ); ?>" value="<?php echo esc_attr( (string) $ndvr_star ); ?>" <?php checked( (int) round( (float) $current ), $ndvr_star ); ?> />
@@ -89,14 +89,24 @@ $ndvr_star_set = static function ( $name, $legend, $current, $id_base ) {
 	<?php if ( ! empty( $media ) ) : ?>
 		<fieldset class="ndvr-field ndvr-edit-media">
 			<legend><?php esc_html_e( 'Your photos', 'rosette-reviews' ); ?></legend>
-			<?php foreach ( $media as $ndvr_m ) : ?>
+			<?php foreach ( $media as $ndvr_i => $ndvr_m ) : ?>
 				<?php $ndvr_mid = $ndvr_p . '-m' . (int) $ndvr_m['id']; ?>
 				<span class="ndvr-edit-photo">
 					<?php if ( 'image' === $ndvr_m['type'] && '' !== (string) $ndvr_m['thumb'] ) : ?>
 						<img src="<?php echo esc_url( $ndvr_m['thumb'] ); ?>" alt="" width="72" height="72" />
 					<?php endif; ?>
 					<input type="checkbox" id="<?php echo esc_attr( $ndvr_mid ); ?>" name="ndvr_remove_media[]" value="<?php echo esc_attr( (string) (int) $ndvr_m['id'] ); ?>" <?php checked( in_array( (int) $ndvr_m['id'], array_map( 'intval', (array) $values['remove_media'] ), true ) ); ?> />
-					<label for="<?php echo esc_attr( $ndvr_mid ); ?>"><?php echo 'image' === $ndvr_m['type'] ? esc_html__( 'Remove this photo', 'rosette-reviews' ) : esc_html__( 'Remove this video', 'rosette-reviews' ); ?></label>
+					<label for="<?php echo esc_attr( $ndvr_mid ); ?>">
+						<?php
+						echo esc_html(
+							'image' === $ndvr_m['type']
+								/* translators: %d: photo number. */
+								? sprintf( __( 'Remove photo %d', 'rosette-reviews' ), (int) $ndvr_i + 1 )
+								/* translators: %d: video number. */
+								: sprintf( __( 'Remove video %d', 'rosette-reviews' ), (int) $ndvr_i + 1 )
+						);
+						?>
+					</label>
 				</span>
 			<?php endforeach; ?>
 		</fieldset>

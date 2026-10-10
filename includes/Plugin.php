@@ -617,6 +617,8 @@ final class Plugin {
 		// filterable list on purpose: a material-connection disclosure must not
 		// be removable (FTC 16 CFR 465, EU Omnibus).
 		( new \NdvReviews\Display\ReviewBadges() )->register();
+		// Likewise the "Edited" label (RR-15, PRD-00 F8.1): a changed review always says so.
+		add_action( 'ndv-reviews/review_meta_after', array( \NdvReviews\Reviews\ReviewEdits::class, 'render_edited' ) );
 
 		/**
 		 * Fires once the free plugin is fully loaded. The Pro add-on boots here,

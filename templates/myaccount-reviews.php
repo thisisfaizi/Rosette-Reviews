@@ -8,6 +8,7 @@
  * @var array<int,array<string,mixed>>                             $mine    The customer's reviews:
  *      view (view-model), comment (WP_Comment), published (bool), edit_url ('' when closed),
  *      closed_on (timestamp the window closed, 0 when not shown).
+ * @var bool                                                       $more    The list shows the newest 50 only.
  *
  * @package NdvReviews
  */
@@ -104,6 +105,9 @@ $ndvr_date = (string) get_option( 'date_format' );
 					</li>
 				<?php endforeach; ?>
 			</ul>
+			<?php if ( ! empty( $more ) ) : ?>
+				<p class="ndvr-account-meta"><?php esc_html_e( 'Your 50 newest reviews are shown.', 'rosette-reviews' ); ?></p>
+			<?php endif; ?>
 		<?php endif; ?>
 	</section>
 </div>

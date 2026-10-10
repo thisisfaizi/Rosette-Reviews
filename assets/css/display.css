@@ -431,7 +431,10 @@ button.ndvr-bar-row.is-current .ndvr-bar-track { background: var(--ndvr-line); }
 .ndvr-edit-form { display: grid; gap: 14px; max-width: 640px; }
 .ndvr-edit-form textarea,
 .ndvr-edit-form input[type="text"] { width: 100%; box-sizing: border-box; }
-.ndvr-edit-note { margin: 0; padding: 10px 12px; border-left: 3px solid var(--ndvr-accent); background: var(--ndvr-paper); }
+.ndvr-edit-note { margin: 0; padding: 10px 12px; border-inline-start: 3px solid var(--ndvr-accent); background: var(--ndvr-paper); }
+/* Screen-reader text on the account page, whatever the theme provides. */
+.ndvr-account-reviews .screen-reader-text,
+.ndvr-edit-form .screen-reader-text { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; padding: 0; margin: -1px; }
 .ndvr-edit-media { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 12px; }
 .ndvr-edit-media legend { font-weight: 600; margin-bottom: 6px; }
 .ndvr-edit-photo { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; }

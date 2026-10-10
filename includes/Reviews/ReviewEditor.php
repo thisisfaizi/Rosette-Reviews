@@ -26,6 +26,9 @@ class ReviewEditor {
 	const PENDING_META   = '_ndvr_pending_edit';
 	const EDITED_META    = '_ndvr_edited_at';
 	const DISCARDED_META = '_ndvr_edit_discarded';
+	const PUBLISHED_META = '_ndvr_published_once';
+	const CONTENT_MAX    = 65525;
+	const TITLE_MAX      = 150;
 	const WINDOW_SETTING = 'edit_window_days';
 	const WINDOW_MAX     = 365;
 
@@ -230,9 +233,14 @@ class ReviewEditor {
 		$source  = (string) get_comment_meta( $id, '_ndvr_source', true );
 
 		// 6. Text.
-		$content = isset( $data['content'] ) && is_string( $data['content'] ) ? trim( wp_kses_post( $data['content'] ) ) : '';
+		// The comment allowlist (what create() stores through wp_filter_comment()
+		// for a customer), never the wider post one.
+		$content = isset( $data['content'] ) && is_string( $data['content'] ) ? trim( wp_kses( $data['content'], 'pre_comment_content' ) ) : '';
 		if ( '' === $content ) {
 			return new \WP_Error( 'ndvr_empty_content', __( 'Please write your review.', 'rosette-reviews' ) );
+		}
+		if ( strlen( $content ) > self::CONTENT_MAX ) {
+			return new \WP_Error( 'ndvr_too_long', __( 'Your review is too long.', 'rosette-reviews' ) );
 		}
 
 		// 7. Minimum length (RR-12).
@@ -281,7 +289,8 @@ class ReviewEditor {
 		$answers = null;
 		if ( $present ) {
 			$answers  = $fields->stored( $id );
-			$rendered = is_array( $present ) ? $present : array_keys( $fields->get_active() );
+			$active   = array_map( 'intval', array_keys( $fields->get_active() ) );
+			$rendered = is_array( $present ) ? array_intersect( array_map( 'intval', $present ), $active ) : $active;
 			foreach ( $rendered as $field_id ) {
 				unset( $answers[ (int) $field_id ] );
 				if ( isset( $clean[ (int) $field_id ] ) ) {
@@ -294,7 +303,7 @@ class ReviewEditor {
 		$own    = array_map( 'intval', wp_list_pluck( \NdvReviews\Plugin::instance()->container()->get( 'review_query' )->media( $id, 'any' ), 'id' ) );
 		$remove = array_values( array_intersect( array_map( 'absint', isset( $data['remove_media'] ) ? (array) $data['remove_media'] : array() ), $own ) );
 
-		$title = isset( $data['title'] ) && is_string( $data['title'] ) ? sanitize_text_field( $data['title'] ) : '';
+		$title = isset( $data['title'] ) && is_string( $data['title'] ) ? mb_substr( sanitize_text_field( $data['title'] ), 0, self::TITLE_MAX ) : '';
 
 		// 10. Store rules (Pro banned words).
 		$validation = apply_filters(
@@ -327,8 +336,13 @@ class ReviewEditor {
 			'via'          => $via,
 		);
 
-		if ( '1' === (string) $comment->comment_approved ) {
-			// Published: the live review stays; the edit waits for a moderator.
+		$was_public = '1' === (string) $comment->comment_approved
+			|| '' !== (string) get_comment_meta( $id, self::PUBLISHED_META, true )
+			|| '' !== (string) get_comment_meta( $id, self::EDITED_META, true )
+			|| '' !== (string) get_comment_meta( $id, '_ndvr_report_held', true );
+		if ( $was_public ) {
+			// Published (now or before, e.g. held after reports): the live review
+			// stays as it is; the edit waits for a moderator.
 			update_comment_meta( $id, self::PENDING_META, $edit );
 
 			/**
@@ -342,10 +356,8 @@ class ReviewEditor {
 			return true;
 		}
 
-		// Not published yet: update it in place (it stays in moderation).
-		$this->apply( $id, $edit, false );
-
-		return true;
+		// Never published: update it in place (it stays in moderation).
+		return $this->apply( $id, $edit, false );
 	}
 
 	/**
@@ -361,9 +373,11 @@ class ReviewEditor {
 		if ( is_wp_error( $pending ) ) {
 			return $pending;
 		}
-		$this->apply( $id, $pending, true );
+		if ( ! in_array( (string) wp_get_comment_status( $id ), array( 'approved', 'unapproved' ), true ) ) {
+			return new \WP_Error( 'ndvr_edit_closed', __( 'This review is in the spam or trash, so the edit can\'t be applied.', 'rosette-reviews' ) );
+		}
 
-		return true;
+		return $this->apply( $id, $pending, true );
 	}
 
 	/**
@@ -376,16 +390,19 @@ class ReviewEditor {
 	 * @return true|\WP_Error
 	 */
 	public function discard_pending( $comment_id, $reason, $expected_submitted_at, array $reasons ) {
-		$id     = absint( $comment_id );
-		$reason = sanitize_key( (string) $reason );
-		if ( ! isset( $reasons[ $reason ] ) ) {
-			return new \WP_Error( 'ndvr_discard_reason', __( 'Choose a reason for discarding the edit.', 'rosette-reviews' ) );
-		}
+		$id      = absint( $comment_id );
+		$reason  = sanitize_key( (string) $reason );
 		$pending = $this->pending_or_error( $id, $expected_submitted_at );
 		if ( is_wp_error( $pending ) ) {
 			return $pending;
 		}
-		delete_comment_meta( $id, self::PENDING_META );
+		if ( ! isset( $reasons[ $reason ] ) ) {
+			return new \WP_Error( 'ndvr_discard_reason', __( 'Choose a reason for discarding the edit.', 'rosette-reviews' ) );
+		}
+		// Only the edit that was read: a newer one saved meanwhile stays.
+		if ( ! delete_comment_meta( $id, self::PENDING_META, $pending ) ) {
+			return new \WP_Error( 'ndvr_edit_changed', __( 'The customer changed this edit again. Check the new version.', 'rosette-reviews' ) );
+		}
 		update_comment_meta(
 			$id,
 			self::DISCARDED_META,
@@ -431,7 +448,7 @@ class ReviewEditor {
 	 * @param int                 $id     Review.
 	 * @param array<string,mixed> $edit   The edit.
 	 * @param bool                $label  Mark the review "Edited" (a published review).
-	 * @return void
+	 * @return true|\WP_Error Nothing is written when the text can't be saved.
 	 */
 	private function apply( $id, array $edit, $label ) {
 		global $wpdb;
@@ -440,16 +457,24 @@ class ReviewEditor {
 		$changes = array();
 
 		if ( isset( $edit['content'] ) && (string) $edit['content'] !== (string) $comment->comment_content ) {
-			wp_update_comment(
+			$updated = wp_update_comment(
 				array(
 					'comment_ID'      => $id,
 					'comment_content' => (string) $edit['content'],
-				)
+				),
+				true
 			);
+			if ( is_wp_error( $updated ) || false === $updated ) {
+				return is_wp_error( $updated ) ? $updated : new \WP_Error( 'ndvr_update_failed', __( 'The review could not be saved. Please try again.', 'rosette-reviews' ) );
+			}
 			$changes['content'] = true;
 		}
 
-		$title = isset( $edit['title'] ) ? (string) $edit['title'] : '';
+		$title     = isset( $edit['title'] ) ? (string) $edit['title'] : '';
+		$old_title = (string) get_comment_meta( $id, '_ndvr_title', true );
+		if ( $old_title !== $title ) {
+			$changes['title'] = true;
+		}
 		if ( '' === $title ) {
 			delete_comment_meta( $id, '_ndvr_title' );
 		} else {
@@ -507,8 +532,9 @@ class ReviewEditor {
 
 		if ( $label ) {
 			update_comment_meta( $id, self::EDITED_META, current_time( 'mysql', true ) );
+			// Only the edit that was applied (m1): a newer one saved meanwhile stays.
+			delete_comment_meta( $id, self::PENDING_META, $edit );
 		}
-		delete_comment_meta( $id, self::PENDING_META );
 		clean_comment_cache( $id );
 
 		/**
@@ -516,8 +542,10 @@ class ReviewEditor {
 		 * moderator, or saved directly while the review waited for approval).
 		 *
 		 * @param int                 $comment_id Review id.
-		 * @param array<string,mixed> $changes    What changed (content, criteria, rating, answers, media).
+		 * @param array<string,mixed> $changes    What changed (content, title, criteria, rating, answers, media).
 		 */
 		do_action( 'ndv-reviews/review_updated', $id, $changes );
+
+		return true;
 	}
 }

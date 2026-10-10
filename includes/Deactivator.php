@@ -32,6 +32,8 @@ class Deactivator {
 			}
 		}
 
+		// The endpoint's rule goes with this flush; the flag must go too (RR-15).
+		delete_option( Account\MyAccountReviews::FLAG );
 		flush_rewrite_rules();
 	}
 }

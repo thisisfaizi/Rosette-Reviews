@@ -41,6 +41,10 @@ class Activator {
 
 		set_transient( 'ndv_reviews_activated', 1, 60 );
 
+		// This flush runs before the plugin boots, without the My Account
+		// endpoint (RR-15): dropping the flag makes the first booted request
+		// flush again with it.
+		delete_option( Account\MyAccountReviews::FLAG );
 		flush_rewrite_rules();
 	}
 }

@@ -428,6 +428,11 @@ final class NDVR_QA_Core_Flows {
 		\NdvReviews\Deactivator::deactivate();
 		\NdvReviews\Activator::activate();
 		delete_transient( 'ndv_reviews_activated' );
+		// The next booted request re-flushes and re-creates the My Account
+		// rewrite flag (RR-15 M1); simulate it.
+		if ( class_exists( '\NdvReviews\Account\MyAccountReviews' ) ) {
+			\NdvReviews\Plugin::instance()->container()->get( 'myaccount_reviews' )->maybe_flush();
+		}
 		$after = $snapshot();
 
 		foreach ( $before as $key => $value ) {

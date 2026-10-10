@@ -47,7 +47,10 @@ class ReviewEdits implements Registerable {
 	 */
 	public function register() {
 		add_filter( 'ndv-reviews/settings_fields', array( $this, 'register_fields' ) );
-		add_action( 'ndv-reviews/review_meta_after', array( $this, 'render_edited' ) );
+		// The "Edited" label is registered by Plugin::boot(), outside the
+		// filterable services, so it can't be removed (F8.1).
+		add_action( 'transition_comment_status', array( __CLASS__, 'mark_published' ), 10, 3 );
+		add_action( 'wp_insert_comment', array( __CLASS__, 'mark_inserted' ), 10, 2 );
 		add_filter( 'ndv-reviews/transparency_sentences', array( $this, 'transparency' ), 10, 2 );
 		add_filter( 'wp_privacy_personal_data_exporters', array( $this, 'register_exporter' ) );
 		add_filter( 'wp_privacy_personal_data_erasers', array( $this, 'register_eraser' ) );
@@ -121,7 +124,7 @@ class ReviewEdits implements Registerable {
 	 * @param array<string,mixed> $review Review view-model.
 	 * @return void
 	 */
-	public function render_edited( $review ) {
+	public static function render_edited( $review ) {
 		$edited = isset( $review['edited_at'] ) ? (string) $review['edited_at'] : '';
 		$time   = '' !== $edited ? strtotime( $edited . ' UTC' ) : false;
 		if ( ! $time ) {
@@ -135,6 +138,35 @@ class ReviewEdits implements Registerable {
 				sprintf( '<time datetime="%1$s">%2$s</time>', esc_attr( gmdate( 'c', $time ) ), esc_html( wp_date( (string) get_option( 'date_format' ), $time ) ) )
 			)
 		);
+	}
+
+	/**
+	 * Remember that a review has been public (M2): a later edit, even while it
+	 * is held, is then a pending revision, never an unmarked in-place change.
+	 *
+	 * @param string      $new_status New status.
+	 * @param string      $old_status Old status.
+	 * @param \WP_Comment $comment    Comment.
+	 * @return void
+	 */
+	public static function mark_published( $new_status, $old_status, $comment ) {
+		unset( $old_status );
+		if ( 'approved' === $new_status && $comment instanceof \WP_Comment && 'review' === $comment->comment_type ) {
+			update_comment_meta( (int) $comment->comment_ID, ReviewEditor::PUBLISHED_META, 1 );
+		}
+	}
+
+	/**
+	 * A review inserted already approved (no status transition fires).
+	 *
+	 * @param int         $id      Comment id.
+	 * @param \WP_Comment $comment Comment.
+	 * @return void
+	 */
+	public static function mark_inserted( $id, $comment ) {
+		if ( $comment instanceof \WP_Comment && '1' === (string) $comment->comment_approved && 'review' === $comment->comment_type ) {
+			update_comment_meta( (int) $id, ReviewEditor::PUBLISHED_META, 1 );
+		}
 	}
 
 	/**
@@ -152,10 +184,10 @@ class ReviewEdits implements Registerable {
 
 		if ( $days > 0 && $invites ) {
 			/* translators: %d: number of days. */
-			$sentences['edits'] = sprintf( __( 'Customers can edit their review for %d days after posting it, or later if we invite them to update it.', 'rosette-reviews' ), $days ) . ' ' . $tail;
+			$sentences['edits'] = sprintf( _n( 'Customers can edit their review for %d day after posting it, or later if we invite them to update it.', 'Customers can edit their review for %d days after posting it, or later if we invite them to update it.', $days, 'rosette-reviews' ), $days ) . ' ' . $tail;
 		} elseif ( $days > 0 ) {
 			/* translators: %d: number of days. */
-			$sentences['edits'] = sprintf( __( 'Customers can edit their review for %d days after posting it.', 'rosette-reviews' ), $days ) . ' ' . $tail;
+			$sentences['edits'] = sprintf( _n( 'Customers can edit their review for %d day after posting it.', 'Customers can edit their review for %d days after posting it.', $days, 'rosette-reviews' ), $days ) . ' ' . $tail;
 		} elseif ( $invites ) {
 			$sentences['edits'] = __( 'Customers can update their review if we invite them to.', 'rosette-reviews' ) . ' ' . $tail;
 		}
@@ -283,7 +315,9 @@ class ReviewEdits implements Registerable {
 	}
 
 	/**
-	 * Eraser: the three edit meta keys.
+	 * Eraser: the customer's own words (the pending edit) and the discard note.
+	 * The "Edited" date stays: it isn't personal data once the review is
+	 * anonymised, and a changed review must keep saying so (F8.1).
 	 *
 	 * @param string $email Email.
 	 * @param int    $page  Page.
@@ -293,7 +327,7 @@ class ReviewEdits implements Registerable {
 		$batch   = $this->review_ids( $email, $page );
 		$removed = false;
 		foreach ( $batch['ids'] as $id ) {
-			foreach ( array( ReviewEditor::PENDING_META, ReviewEditor::EDITED_META, ReviewEditor::DISCARDED_META ) as $key ) {
+			foreach ( array( ReviewEditor::PENDING_META, ReviewEditor::DISCARDED_META ) as $key ) {
 				$removed = delete_comment_meta( $id, $key ) || $removed;
 			}
 		}
