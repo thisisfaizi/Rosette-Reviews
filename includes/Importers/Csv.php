@@ -110,12 +110,10 @@ class Csv {
 			}
 		}
 
-		// A single overall rating is applied to every criterion of the row's
-		// product (RR-20), so the review's overall score equals the CSV rating.
-		$criteria_ids = array();
-		foreach ( $this->criteria->get_active() as $criterion ) {
-			$criteria_ids[] = (int) $criterion->id;
-		}
+		// Rows need at least one active criterion. Each row's single rating is
+		// applied to every criterion of its own product (RR-20, below), so the
+		// review's overall score equals the CSV rating.
+		$any_active = (bool) $this->criteria->get_active();
 
 		while ( ( $row = fgetcsv( $handle, 0, ',', '"', '\\' ) ) !== false ) { // phpcs:ignore WordPress.CodeAnalysis.AssignmentInCondition.FoundInWhileCondition
 			if ( array( null ) === $row ) {
@@ -141,7 +139,7 @@ class Csv {
 				$this->skip( $result, __( 'rating not between 1 and 5', 'rosette-reviews' ) );
 				continue;
 			}
-			if ( empty( $criteria_ids ) ) {
+			if ( ! $any_active ) {
 				$this->skip( $result, __( 'no active rating criteria', 'rosette-reviews' ) );
 				continue;
 			}

@@ -37,20 +37,85 @@ class CriteriaRepository {
 	private static $active_rows = null;
 
 	/**
-	 * Category ids (with ancestors) per pool id, for this request.
+	 * Built active criteria per locale (names come from the criteria_name
+	 * filter, so a locale switch gets its own list).
+	 *
+	 * @var array<string,Criteria[]>
+	 */
+	private static $built = array();
+
+	/**
+	 * Every criterion row (any status), for this request.
+	 *
+	 * @var array<int,object>|null
+	 */
+	private static $all_rows = null;
+
+	/**
+	 * Category ids (with ancestors, in the default language) per post id.
 	 *
 	 * @var array<int,int[]>
 	 */
 	private static $terms = array();
 
 	/**
-	 * Forget the cached rows (after any write).
+	 * Forget every cached read (after any write, a category change or a
+	 * blog switch).
 	 *
 	 * @return void
 	 */
 	public static function flush() {
 		self::$active_rows = null;
+		self::$built       = array();
+		self::$all_rows    = null;
 		self::$terms       = array();
+	}
+
+	/**
+	 * Clear the caches whenever categories or the site change (once per
+	 * request, from Plugin::boot()).
+	 *
+	 * @return void
+	 */
+	public static function listen() {
+		foreach ( array( 'set_object_terms', 'edited_product_cat', 'delete_product_cat', 'created_product_cat', 'switch_blog' ) as $hook ) {
+			add_action( $hook, array( __CLASS__, 'flush' ) );
+		}
+	}
+
+	/**
+	 * Whether any active criterion is limited to categories.
+	 *
+	 * @return bool
+	 */
+	public function has_scoped() {
+		foreach ( $this->active_rows() as $row ) {
+			if ( isset( $row->scope ) && self::SCOPE_CATEGORY === $row->scope ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Category ids in the site's default language, so a criterion scoped in
+	 * one language applies to the translations too (Integrations\Multilingual
+	 * maps them; ids are unchanged without a multilingual plugin).
+	 *
+	 * @param int[] $ids product_cat term ids.
+	 * @return int[]
+	 */
+	public static function canonical_terms( array $ids ) {
+		/**
+		 * Filter product category ids before criteria scopes are stored or
+		 * compared (free maps WPML / Polylang translations to the default language).
+		 *
+		 * @param int[] $ids Term ids.
+		 */
+		$mapped = apply_filters( 'ndv-reviews/criteria_term_ids', array_map( 'absint', $ids ) );
+
+		return array_values( array_unique( array_filter( array_map( 'absint', is_array( $mapped ) ? $mapped : $ids ) ) ) );
 	}
 
 	/**
@@ -79,10 +144,7 @@ class CriteriaRepository {
 	 * @return Criteria[]
 	 */
 	public function get_active( $product_id = null ) {
-		$all = array();
-		foreach ( $this->active_rows() as $row ) {
-			$all[] = Criteria::from_row( $row );
-		}
+		$all = $this->built_active();
 
 		$product_id = absint( $product_id );
 		if ( ! $product_id || ! self::scoping_ready() ) {
@@ -91,12 +153,19 @@ class CriteriaRepository {
 		}
 
 		$pool    = Pool::resolve_id( $product_id );
+		$terms   = null;
 		$globals = array();
 		$scoped  = array();
 		foreach ( $all as $criterion ) {
 			if ( ! self::is_scoped( $criterion ) ) {
 				$globals[] = $criterion;
-			} elseif ( $this->applies_to( $criterion, $pool ) ) {
+				continue;
+			}
+			if ( null === $terms ) {
+				// Variations have no categories of their own: the parent's.
+				$terms = self::pool_terms( Pool::origin_id( $pool ) );
+			}
+			if ( $criterion->scope_ids && array_intersect( $criterion->scope_ids, $terms ) ) {
 				$scoped[] = $criterion;
 			}
 		}
@@ -121,6 +190,23 @@ class CriteriaRepository {
 	 */
 	private static function is_criteria( $value ) {
 		return $value instanceof Criteria;
+	}
+
+	/**
+	 * The active criteria as objects, built once per locale.
+	 *
+	 * @return Criteria[]
+	 */
+	private function built_active() {
+		$key = (string) determine_locale();
+		if ( ! isset( self::$built[ $key ] ) ) {
+			self::$built[ $key ] = array();
+			foreach ( $this->active_rows() as $row ) {
+				self::$built[ $key ][] = Criteria::from_row( $row );
+			}
+		}
+
+		return self::$built[ $key ];
 	}
 
 	/**
@@ -195,7 +281,7 @@ class CriteriaRepository {
 					}
 				}
 			}
-			self::$terms[ $pool_id ] = array_values( array_unique( $ids ) );
+			self::$terms[ $pool_id ] = self::canonical_terms( $ids );
 		}
 
 		return self::$terms[ $pool_id ];
@@ -226,7 +312,12 @@ class CriteriaRepository {
 				$ids[] = $term_id;
 			}
 		}
-		$ids = array_values( array_unique( $ids ) );
+		// Categories were chosen but none exist (deleted meanwhile, or not
+		// product categories): never fall back to "all products".
+		if ( $term_ids && ! $ids ) {
+			return new \WP_Error( 'ndvr_criteria_terms', __( 'None of the chosen categories exist any more. Choose again.', 'rosette-reviews' ) );
+		}
+		$ids = self::canonical_terms( $ids );
 		sort( $ids );
 
 		if ( $ids && ! self::is_scoped( $existing ) && $this->is_last_active( $existing ) ) {
@@ -248,9 +339,24 @@ class CriteriaRepository {
 		if ( false === $updated ) {
 			return new \WP_Error( 'ndvr_criteria_db', __( 'Could not save the criterion.', 'rosette-reviews' ) );
 		}
+		// Two saves at once could each see another global left: check again
+		// and undo this one if none remain.
+		if ( $ids && 0 === $this->active_global_count() ) {
+			$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				Db::table( 'criteria' ),
+				array(
+					'scope'     => $existing->scope,
+					'scope_ids' => $existing->scope_ids ? implode( ',', $existing->scope_ids ) : null,
+				),
+				array( 'id' => absint( $id ) ),
+				array( '%s', '%s' ),
+				array( '%d' )
+			);
+			self::flush();
+			return new \WP_Error( 'ndvr_criteria_last_global', __( 'At least one criterion must show for all products, so every product has a star rating.', 'rosette-reviews' ) );
+		}
 
-		/** This action is documented in CriteriaRepository::saved(). */
-		do_action( 'ndv-reviews/criteria_saved', absint( $id ), 'scoped' );
+		self::saved( $id, 'scoped' );
 
 		return true;
 	}
@@ -281,7 +387,7 @@ class CriteriaRepository {
 	}
 
 	/**
-	 * Fire `criteria_saved` after a change from the admin.
+	 * Fire `criteria_saved` after any change through this repository.
 	 *
 	 * @param int    $id     Criterion id.
 	 * @param string $change added|toggled|deleted|scoped.
@@ -303,15 +409,15 @@ class CriteriaRepository {
 	 * @return Criteria[]
 	 */
 	public function get_all() {
-		global $wpdb;
-
-		$table = Db::table( 'criteria' );
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$rows = $wpdb->get_results( "SELECT * FROM `{$table}` ORDER BY position ASC, id ASC" );
+		if ( null === self::$all_rows ) {
+			global $wpdb;
+			$table = Db::table( 'criteria' );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			self::$all_rows = (array) $wpdb->get_results( "SELECT * FROM `{$table}` ORDER BY position ASC, id ASC" );
+		}
 
 		$out = array();
-		foreach ( (array) $rows as $row ) {
+		foreach ( self::$all_rows as $row ) {
 			$out[] = Criteria::from_row( $row );
 		}
 
@@ -387,8 +493,13 @@ class CriteriaRepository {
 		);
 
 		self::flush();
+		if ( ! $inserted ) {
+			return new \WP_Error( 'ndvr_criteria_db', __( 'Could not save the criterion.', 'rosette-reviews' ) );
+		}
+		$new_id = (int) $wpdb->insert_id;
+		self::saved( $new_id, 'added' );
 
-		return $inserted ? (int) $wpdb->insert_id : new \WP_Error( 'ndvr_criteria_db', __( 'Could not save the criterion.', 'rosette-reviews' ) );
+		return $new_id;
 	}
 
 	/**
@@ -446,8 +557,20 @@ class CriteriaRepository {
 
 		$updated = $wpdb->update( Db::table( 'criteria' ), $fields, array( 'id' => $id ), $format, array( '%d' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		self::flush();
+		if ( false === $updated ) {
+			return false;
+		}
+		if ( isset( $fields['status'] ) && 'inactive' === $fields['status'] && ! self::is_scoped( $existing ) && 0 === $this->active_global_count() ) {
+			// Two deactivations at once: undo this one.
+			$wpdb->update( Db::table( 'criteria' ), array( 'status' => 'active' ), array( 'id' => $id ), array( '%s' ), array( '%d' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			self::flush();
+			return $this->last_active_error();
+		}
+		if ( isset( $fields['status'] ) && $fields['status'] !== $existing->status ) {
+			self::saved( (int) $id, 'toggled' );
+		}
 
-		return false !== $updated;
+		return true;
 	}
 
 	/**
@@ -494,6 +617,10 @@ class CriteriaRepository {
 			$ratings->recalc_product( $product_id );
 		}
 
+		if ( $deleted ) {
+			self::saved( $id, 'deleted' );
+		}
+
 		return (bool) $deleted;
 	}
 
@@ -509,14 +636,24 @@ class CriteriaRepository {
 		if ( 'active' !== $criterion->status || self::is_scoped( $criterion ) ) {
 			return false;
 		}
-		$globals = 0;
-		foreach ( $this->active_rows() as $row ) {
-			if ( ! self::is_scoped( Criteria::from_row( $row ) ) ) {
-				++$globals;
-			}
+		return $this->active_global_count() <= 1;
+	}
+
+	/**
+	 * Active global criteria, counted fresh (write paths only).
+	 *
+	 * @return int
+	 */
+	private function active_global_count() {
+		global $wpdb;
+		$table = Db::table( 'criteria' );
+		if ( ! self::scoping_ready() ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			return (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$table}` WHERE status = 'active'" );
 		}
 
-		return $globals <= 1;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		return (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$table}` WHERE status = 'active' AND scope <> 'category'" );
 	}
 
 	/**

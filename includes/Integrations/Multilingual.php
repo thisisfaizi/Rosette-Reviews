@@ -72,6 +72,7 @@ class Multilingual implements Registerable {
 	 */
 	public function register() {
 		add_filter( 'ndv-reviews/translate_setting', array( $this, 'translate_filter' ), 10, 3 );
+		add_filter( 'ndv-reviews/criteria_term_ids', array( $this, 'default_language_terms' ) );
 		add_action( 'admin_init', array( $this, 'register_strings' ) );
 		add_action( 'update_option_' . NDVR_OPTION_SETTINGS, array( $this, 'on_settings_updated' ), 10, 2 );
 		add_action( 'ndv-reviews/reminders_settings_after', array( $this, 'render_note' ) );
@@ -174,6 +175,35 @@ class Multilingual implements Registerable {
 		}
 
 		return $lang;
+	}
+
+	/**
+	 * Map product category ids to their default-language term, so criteria
+	 * scoped to a category also apply to its translations (RR-20).
+	 *
+	 * @param int[] $ids Term ids.
+	 * @return int[]
+	 */
+	public function default_language_terms( $ids ) {
+		$plugin = $this->active();
+		if ( '' === $plugin || ! is_array( $ids ) ) {
+			return $ids;
+		}
+		$code = $this->default_language()['code'];
+		$out  = array();
+		foreach ( $ids as $id ) {
+			$id = absint( $id );
+			if ( 'wpml' === $plugin ) {
+				$mapped = (int) apply_filters( 'wpml_object_id', $id, 'product_cat', true, $code );
+			} elseif ( function_exists( 'pll_get_term' ) ) {
+				$mapped = (int) pll_get_term( $id, $code );
+			} else {
+				$mapped = 0;
+			}
+			$out[] = $mapped > 0 ? $mapped : $id;
+		}
+
+		return $out;
 	}
 
 	/**

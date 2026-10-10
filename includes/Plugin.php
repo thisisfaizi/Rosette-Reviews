@@ -619,6 +619,7 @@ final class Plugin {
 		( new \NdvReviews\Display\ReviewBadges() )->register();
 		// Likewise the "Edited" label (RR-15, PRD-00 F8.1): a changed review always says so.
 		add_action( 'ndv-reviews/review_meta_after', array( \NdvReviews\Reviews\ReviewEdits::class, 'render_edited' ) );
+		\NdvReviews\Reviews\CriteriaRepository::listen();
 
 		/**
 		 * Fires once the free plugin is fully loaded. The Pro add-on boots here,

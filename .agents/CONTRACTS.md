@@ -363,3 +363,7 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   true|WP_Error|null; actions `ndv-reviews/criteria_row_after( Criteria )`, `ndv-reviews/criteria_saved( $id, $change )`.
   Template variable `$criteria_by_product` (magic-landing.php). The last active **global** criterion can't be
   deactivated, deleted or scoped.
+- RR-20 rev 6: `set_scope()` may return `ndvr_criteria_terms`; filter `ndv-reviews/criteria_term_ids( int[] )` (free maps
+  WPML/Polylang to the default language); `CriteriaRepository::canonical_terms()`, `listen()`, `has_scoped()`. `criteria_saved`
+  fires from the repository (added, toggled on a status change, deleted, scoped). `criteria_handle_action` results other than
+  true/WP_Error are failures. `required_columns()` includes `criteria.scope_ids`.

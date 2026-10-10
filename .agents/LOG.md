@@ -931,3 +931,8 @@ EVIDENCE: rr-16-js.mjs 24/24 (8 new); rr-16.php green.
 - PRD rev 4 reconciled (V_CRITERIA_SCOPE 8, NDVR_API 11, RR-15 edits as a new caller, a per-request cache), rev 5 as built.
 - `criteria_handle_action` became a filter so Pro can report refusals; variations use the parent's categories.
 EVIDENCE: rr-20 30/30; 16 mutations (14 caught, 2 equivalent); Pro rr-20p 14/14 (5 mutations caught); phpcs: no new issues.
+
+## 2026-10-11 — RR-20 code review fixed → done
+- Review `.agents/prd/reviews/code-RR-20.md`: 0 blockers, 4 majors, 11 minors, 11 test gaps; decisions in PRD RR-20 rev 6.
+  M4 (WPML/Polylang term ids) is from how those plugins store translations; covered with a mapping filter in the harness,
+  a real multilingual site check is part of OC-11's release pass.

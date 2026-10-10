@@ -92,6 +92,7 @@ final class NDVR_QA_RR20 {
 			$this->ac12();
 			$this->ac13();
 			$this->extras();
+			$this->review_fixes();
 		} catch ( \Throwable $e ) {
 			$this->ok( false, 'uncaught ' . get_class( $e ) . ': ' . $e->getMessage() . ' @ ' . basename( $e->getFile() ) . ':' . $e->getLine() );
 		}
@@ -357,7 +358,7 @@ final class NDVR_QA_RR20 {
 		}
 		$fit = 'ndvr_criteria[' . $this->fx['fit'] . ']';
 		if ( null === $html ) {
-			$this->line( 'SKIP: AC7 render (needs NDVR_QA_BOOT).' );
+			$this->ok( false, 'AC7: the landing page could not be rendered (needs NDVR_QA_BOOT)' );
 		} else {
 			$this->ok( isset( $forms[ $this->fx['shoe'] ], $forms[ $this->fx['beans'] ] ) && false !== strpos( $forms[ $this->fx['shoe'] ], $fit ) && false === strpos( $forms[ $this->fx['beans'] ], $fit ), 'AC7: on the landing page the shoe form has Fit and the coffee form doesn\'t' );
 		}
@@ -435,9 +436,11 @@ final class NDVR_QA_RR20 {
 	private function ac10() {
 		$globals = $this->fx['globals'];
 		$first   = array_shift( $globals );
+		$prep = true;
 		foreach ( $globals as $gid ) {
-			$this->repo()->set_scope( $gid, array( $this->fx['coffee'] ) );
+			$prep = true === $this->repo()->set_scope( $gid, array( $this->fx['coffee'] ) ) && $prep;
 		}
+		$this->ok( $prep, 'AC10: the other globals could be scoped (setup)' );
 		$scope = $this->repo()->set_scope( $first, array( $this->fx['shoes'] ) );
 		$off   = $this->repo()->update( $first, array( 'status' => 'inactive' ) );
 		$fit   = $this->repo()->update( $this->fx['fit'], array( 'status' => 'inactive' ) );
@@ -610,6 +613,207 @@ final class NDVR_QA_RR20 {
 	}
 
 	// --------------------------------------------------------------- helpers
+
+	/**
+	 * Code review RR-20 (rev 6): M1, M2, M4, m1, m2, m3, m8 and T1, T4–T8, T11.
+	 *
+	 * @return void
+	 */
+	private function review_fixes() {
+		global $wpdb;
+		$repo = $this->repo();
+		$fit  = $this->fx['fit'];
+		$repo->set_scope( $fit, array( $this->fx['shoes'] ) );
+
+		// M1 / T1: the column is a required column of V_CRITERIA_SCOPE, and an
+		// upgrade from 7 stamps 8.
+		$req = new \ReflectionMethod( Installer::class, 'required_columns' );
+		$req->setAccessible( true );
+		$cols = $req->invoke( null );
+		$this->ok( isset( $cols[ Installer::V_CRITERIA_SCOPE ]['criteria'] ) && in_array( 'scope_ids', $cols[ Installer::V_CRITERIA_SCOPE ]['criteria'], true ), 'M1: scope_ids is a required column of V_CRITERIA_SCOPE (a skipped ALTER can\'t stamp 8)' );
+		update_option( NDVR_OPTION_DB_VERSION, (string) ( Installer::V_CRITERIA_SCOPE - 1 ) );
+		delete_transient( Installer::BACKOFF_TRANSIENT );
+		Installer::maybe_upgrade();
+		$this->ok( (int) get_option( NDVR_OPTION_DB_VERSION ) === (int) NDVR_DB_VERSION, 'T1: an upgrade from version 7 runs and stamps the current version' );
+
+		// M2 / T4: only unknown ids is refused; the scope is unchanged.
+		$res = $repo->set_scope( $fit, array( 999999 ) );
+		$now = $repo->find( $fit );
+		$this->ok( is_wp_error( $res ) && 'ndvr_criteria_terms' === $res->get_error_code() && array( $this->fx['shoes'] ) === $now->scope_ids, 'M2: set_scope() with only unknown categories is refused and changes nothing' );
+
+		// M4: translated categories map to the default language.
+		$fr      = $this->term( 'RR20 Chaussures' );
+		$fr_shoe = $this->product( 'RR20 Chaussure', array( $fr ) );
+		$map     = function ( $ids ) use ( $fr ) {
+			return array_map(
+				function ( $id ) use ( $fr ) {
+					return (int) $id === $fr ? $this->fx['shoes'] : (int) $id;
+				},
+				(array) $ids
+			);
+		};
+		add_filter( 'ndv-reviews/criteria_term_ids', $map );
+		CriteriaRepository::flush();
+		$on_fr = in_array( $fit, $this->ids( $repo->get_active( $fr_shoe ) ), true );
+		$repo->set_scope( $fit, array( $fr ) );
+		$stored = $repo->find( $fit )->scope_ids;
+		remove_filter( 'ndv-reviews/criteria_term_ids', $map );
+		CriteriaRepository::flush();
+		$this->ok( $on_fr && array( $this->fx['shoes'] ) === $stored, 'M4: a translated category counts as its default-language category, and scopes are stored in the default language' );
+		$repo->set_scope( $fit, array( $this->fx['shoes'] ) );
+
+		// m1 / T7: names follow the locale (built per locale).
+		$name = static function ( $n ) {
+			return $n . '@' . determine_locale();
+		};
+		$fr_locale = static function () {
+			return 'fr_FR';
+		};
+		add_filter( 'ndv-reviews/criteria_name', $name );
+		CriteriaRepository::flush();
+		$a = wp_list_pluck( $repo->get_active(), 'name' );
+		add_filter( 'determine_locale', $fr_locale );
+		$b = wp_list_pluck( $repo->get_active(), 'name' );
+		remove_filter( 'determine_locale', $fr_locale );
+		remove_filter( 'ndv-reviews/criteria_name', $name );
+		CriteriaRepository::flush();
+		$this->ok( $a && $b && false === strpos( implode( ',', $a ), '@fr_FR' ) && false !== strpos( implode( ',', $b ), '@fr_FR' ), 'm1/T7: criterion names are rebuilt for a new locale' );
+
+		// m2 / T8: caches follow category changes, deactivation and deletion.
+		$before = in_array( $fit, $this->ids( $repo->get_active( $this->fx['beans'] ) ), true );
+		wp_set_object_terms( $this->fx['beans'], array( $this->fx['coffee'], $this->fx['shoes'] ), 'product_cat' );
+		$after = in_array( $fit, $this->ids( $repo->get_active( $this->fx['beans'] ) ), true );
+		wp_set_object_terms( $this->fx['beans'], array( $this->fx['coffee'] ), 'product_cat' );
+		$this->ok( ! $before && $after, 'm2/T8: changing a product\'s categories updates its criteria in the same request' );
+		$repo->get_active( $this->fx['shoe'] );
+		$repo->update( $fit, array( 'status' => 'inactive' ) );
+		$off = ! in_array( $fit, $this->ids( $repo->get_active( $this->fx['shoe'] ) ), true );
+		$repo->update( $fit, array( 'status' => 'active' ) );
+		$tmp = (int) $repo->insert( array( 'name' => 'RR20 Temp' ) );
+		$repo->get_active();
+		$repo->delete( $tmp );
+		$gone = ! in_array( $tmp, $this->ids( $repo->get_active() ), true );
+		$this->ok( $off && $gone, 'T8: deactivating and deleting clear the cache' );
+
+		// m8: criteria_saved fires from the repository for every change.
+		$events = array();
+		$spy    = static function ( $id, $change ) use ( &$events ) {
+			$events[] = $change;
+		};
+		add_action( 'ndv-reviews/criteria_saved', $spy, 10, 2 );
+		$x = (int) $repo->insert( array( 'name' => 'RR20 Events' ) );
+		$repo->update( $x, array( 'status' => 'inactive' ) );
+		$repo->update( $x, array( 'position' => 99 ) );
+		$repo->delete( $x );
+		remove_action( 'ndv-reviews/criteria_saved', $spy, 10 );
+		$this->ok( array( 'added', 'toggled', 'deleted' ) === $events, 'm8: criteria_saved fires from the repository: added, toggled (not for a position change), deleted' );
+
+		// m8: a non-true, non-error filter result is never success.
+		$odd  = static function ( $result, $do ) {
+			return 'qa_odd' === $do ? 0 : $result;
+		};
+		add_filter( 'ndv-reviews/criteria_handle_action', $odd, 10, 2 );
+		$page              = new \NdvReviews\Admin\CriteriaPage( $repo );
+		$_POST             = array(
+			'ndvr_criteria_do' => 'qa_odd',
+			'ndvr_id'          => (string) $fit,
+			'_wpnonce'         => wp_create_nonce( \NdvReviews\Admin\CriteriaPage::NONCE ),
+		);
+		$_REQUEST          = $_POST;
+		$page->handle_actions();
+		$_POST    = array();
+		$_REQUEST = array();
+		remove_filter( 'ndv-reviews/criteria_handle_action', $odd, 10 );
+		ob_start();
+		$page->render();
+		$html = (string) ob_get_clean();
+		$this->ok( false !== strpos( $html, 'That change could not be saved.' ) && false === strpos( $html, 'Criterion updated.' ), 'm8: a filter result that is neither true nor a WP_Error is reported as a failure' );
+
+		// T5: a valid nonce without the capability never reaches the filter.
+		$calls = 0;
+		$count = static function ( $r ) use ( &$calls ) {
+			++$calls;
+			return $r;
+		};
+		add_filter( 'ndv-reviews/criteria_handle_action', $count );
+		$sub = (int) wp_insert_user(
+			array(
+				'user_login' => 'rr20sub' . wp_generate_password( 4, false, false ),
+				'user_pass'  => wp_generate_password(),
+				'role'       => 'subscriber',
+			)
+		);
+		wp_set_current_user( $sub );
+		$_POST    = array(
+			'ndvr_criteria_do' => 'qa_cap',
+			'_wpnonce'         => wp_create_nonce( \NdvReviews\Admin\CriteriaPage::NONCE ),
+		);
+		$_REQUEST = $_POST;
+		$die      = static function () {
+			return static function () {
+				throw new NDVR_QA_20_Die();
+			};
+		};
+		add_filter( 'wp_die_handler', $die );
+		$died = false;
+		try {
+			( new \NdvReviews\Admin\CriteriaPage( $repo ) )->handle_actions();
+		} catch ( NDVR_QA_20_Die $e ) {
+			$died = true;
+		}
+		remove_filter( 'wp_die_handler', $die );
+		remove_filter( 'ndv-reviews/criteria_handle_action', $count );
+		$_POST    = array();
+		$_REQUEST = array();
+		wp_set_current_user( 1 );
+		wp_delete_user( $sub );
+		$this->ok( $died && 0 === $calls, 'T5: a valid nonce without the capability stops before criteria_handle_action' );
+
+		// T6: the cap applies after globals-then-scoped ordering.
+		$width = (int) $repo->insert( array( 'name' => 'RR20 Width', 'position' => -1 ) );
+		$this->fx['criteria'][] = $width;
+		$repo->set_scope( $width, array( $this->fx['shoes'] ) );
+		$cap = count( $this->fx['globals'] ) + 1;
+		$cf  = static function () use ( $cap ) {
+			return $cap;
+		};
+		add_filter( 'ndv-reviews/max_criteria', $cf, 1000 );
+		$ids = $this->ids( $repo->get_active( $this->fx['shoe'] ) );
+		remove_filter( 'ndv-reviews/max_criteria', $cf, 1000 );
+		$this->ok( array_merge( $this->fx['globals'], array( $width ) ) === $ids, 'T6: with the cap at globals + 1, a shoe gets every global then the lower-position category criterion (Width before Fit)' );
+		// Width (shoes only) sorts first: coffee must still get every global under a cap of exactly the globals.
+		$gc  = count( $this->fx['globals'] );
+		$cf2 = static function () use ( $gc ) {
+			return $gc;
+		};
+		add_filter( 'ndv-reviews/max_criteria', $cf2, 1000 );
+		$coffee_ids = $this->ids( $repo->get_active( $this->fx['beans'] ) );
+		remove_filter( 'ndv-reviews/max_criteria', $cf2, 1000 );
+		$this->ok( $this->fx['globals'] === $coffee_ids, 'T6: the cap counts only the product\'s own criteria (a shoes-only criterion sorted first takes no coffee slot)' );
+		$repo->delete( $width );
+
+		// T11: My Account edits offer the globals and, on a shoe, Fit.
+		$editor = $this->c()->get( 'reviews' )->editor();
+		$coffee = $editor->allowed_criteria( $this->fx['comments'][0] );
+		$shoe   = $editor->allowed_criteria( $this->last( $this->fx['shoe'] ) );
+		$this->ok( ! array_diff( $this->fx['globals'], array_keys( $coffee ) ) && ! isset( $coffee[ $fit ] ) && isset( $shoe[ $fit ] ), 'T11: My Account edits offer every global, and Fit only on a shoe review' );
+
+		// m3: a summary with no category rows reads the criteria table once.
+		$repo->set_scope( $fit, array() );
+		CriteriaRepository::flush();
+		$q   = 0;
+		$spy = static function ( $sql ) use ( &$q ) {
+			if ( false !== strpos( $sql, 'ndvr_criteria' ) && false === strpos( $sql, 'review_criteria' ) ) {
+				++$q;
+			}
+			return $sql;
+		};
+		add_filter( 'query', $spy );
+		$this->c()->get( 'summary' )->for_product( $this->fx['beans'] );
+		remove_filter( 'query', $spy );
+		$this->ok( 0 === $q, 'm3: the summary reads no extra criteria table when no criterion is limited to categories' );
+		$repo->set_scope( $fit, array( $this->fx['shoes'] ) );
+	}
 
 	/**
 	 * A product category.

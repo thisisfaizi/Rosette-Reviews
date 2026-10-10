@@ -135,7 +135,7 @@ class ReviewEditor {
 
 	/**
 	 * Criteria a review may be scored on: those it already has (any status),
-	 * plus the active ones.
+	 * plus the active ones for its product's categories (RR-20).
 	 *
 	 * @param int $comment_id Review.
 	 * @return array<int,object> id => criterion.

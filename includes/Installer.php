@@ -394,11 +394,14 @@ class Installer {
 	 */
 	private static function required_columns() {
 		return array(
-			self::V_PIPELINE => array(
+			self::V_PIPELINE       => array(
 				'requests' => array( 'source', 'origin', 'dedupe_key', 'token_id', 'claimed_at', 'opened_at', 'reviewed_at', 'meta' ),
 			),
-			self::V_QA_EMAIL => array(
+			self::V_QA_EMAIL       => array(
 				'questions' => array( 'author_email', 'notified_at' ),
+			),
+			self::V_CRITERIA_SCOPE => array(
+				'criteria' => array( 'scope_ids' ),
 			),
 		);
 	}

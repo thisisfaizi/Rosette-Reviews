@@ -521,6 +521,10 @@ class Landing implements Registerable {
 	 */
 	private function criteria_by_product( $product_ids ) {
 		$out = array();
+		// One term query for every product, only when some criterion is scoped.
+		if ( $product_ids && $this->criteria->has_scoped() ) {
+			update_object_term_cache( array_map( 'absint', (array) $product_ids ), 'product' );
+		}
 		foreach ( (array) $product_ids as $product_id ) {
 			$out[ (int) $product_id ] = $this->criteria->get_active( (int) $product_id );
 		}

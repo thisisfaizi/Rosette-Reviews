@@ -93,9 +93,6 @@ class CriteriaPage implements Registerable {
 			$name   = isset( $_POST['ndvr_name'] ) ? sanitize_text_field( wp_unslash( $_POST['ndvr_name'] ) ) : '';
 			$result = $this->criteria->insert( array( 'name' => $name ) );
 			$this->push_result( $result, __( 'Criterion added.', 'rosette-reviews' ) );
-			if ( ! is_wp_error( $result ) ) {
-				CriteriaRepository::saved( (int) $result, 'added' );
-			}
 		} elseif ( 'delete' === $do ) {
 			$id = isset( $_POST['ndvr_id'] ) ? absint( $_POST['ndvr_id'] ) : 0;
 			$result = $this->criteria->delete( $id );
@@ -103,17 +100,11 @@ class CriteriaPage implements Registerable {
 				$result = new \WP_Error( 'ndvr_criteria_missing', __( 'That criterion no longer exists.', 'rosette-reviews' ) );
 			}
 			$this->push_result( $result, __( 'Criterion deleted.', 'rosette-reviews' ) );
-			if ( ! is_wp_error( $result ) ) {
-				CriteriaRepository::saved( $id, 'deleted' );
-			}
 		} elseif ( 'toggle' === $do ) {
 			$id      = isset( $_POST['ndvr_id'] ) ? absint( $_POST['ndvr_id'] ) : 0;
 			$status  = isset( $_POST['ndvr_status'] ) && 'active' === $_POST['ndvr_status'] ? 'active' : 'inactive';
 			$result  = $this->criteria->update( $id, array( 'status' => $status ) );
 			$this->push_result( $result, __( 'Criterion updated.', 'rosette-reviews' ) );
-			if ( ! is_wp_error( $result ) ) {
-				CriteriaRepository::saved( $id, 'toggled' );
-			}
 		} else {
 			$id = isset( $_POST['ndvr_id'] ) ? absint( $_POST['ndvr_id'] ) : 0;
 
@@ -126,8 +117,11 @@ class CriteriaPage implements Registerable {
 			 * @param int                 $id     The posted criterion id (0 when none).
 			 */
 			$result = apply_filters( 'ndv-reviews/criteria_handle_action', null, $do, $id );
-			if ( null !== $result ) {
+			if ( true === $result || is_wp_error( $result ) ) {
 				$this->push_result( $result, __( 'Criterion updated.', 'rosette-reviews' ) );
+			} elseif ( null !== $result ) {
+				// Only true or a WP_Error mean anything; never report another value as success.
+				$this->push_result( new \WP_Error( 'ndvr_criteria_action', __( 'That change could not be saved.', 'rosette-reviews' ) ), '' );
 			}
 		}
 	}

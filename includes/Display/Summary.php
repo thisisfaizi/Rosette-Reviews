@@ -112,13 +112,13 @@ class Summary {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT rc.criteria_id AS id, cr.name AS name, AVG( rc.rating ) AS average, cr.position AS position
+				"SELECT rc.criteria_id AS id, cr.name AS name, cr.scope AS scope, AVG( rc.rating ) AS average, cr.position AS position
 				FROM {$rc} rc
 				INNER JOIN {$wpdb->comments} c ON c.comment_ID = rc.comment_id
 				INNER JOIN {$criteria} cr ON cr.id = rc.criteria_id
 				WHERE c.comment_post_ID = %d
 				AND c.comment_approved = '1'
-				GROUP BY rc.criteria_id, cr.name, cr.position
+				GROUP BY rc.criteria_id, cr.name, cr.scope, cr.position
 				ORDER BY cr.position ASC",
 				$product_id
 			)
@@ -128,7 +128,8 @@ class Summary {
 		// out, even if old reviews hold a score for it. Global ones always show.
 		$repo   = \NdvReviews\Plugin::instance()->container()->get( 'criteria' );
 		$scoped = array();
-		if ( \NdvReviews\Reviews\CriteriaRepository::scoping_ready() ) {
+		// Only when a row is limited to categories (rare): no extra read otherwise.
+		if ( \NdvReviews\Reviews\CriteriaRepository::scoping_ready() && in_array( \NdvReviews\Reviews\CriteriaRepository::SCOPE_CATEGORY, wp_list_pluck( (array) $rows, 'scope' ), true ) ) {
 			foreach ( $repo->get_all() as $criterion ) {
 				if ( \NdvReviews\Reviews\CriteriaRepository::is_scoped( $criterion ) ) {
 					$scoped[ (int) $criterion->id ] = $criterion;
