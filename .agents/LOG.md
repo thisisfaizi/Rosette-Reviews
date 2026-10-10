@@ -920,3 +920,9 @@ next-request re-flush; all 20 suites green; debug.log empty; phpcs clean on the 
 - Also this session: Pro RR-14P-4 (AI auto-publish skips reviews that were public; rr-14p.php 2/2, fails without the fix),
   `.agents/qa/reset-qa.php`, one owner-check list at the top of TASKS.
 EVIDENCE: rr-16 42/42; all 21 suites green; debug.log empty; phpcs: no new issues.
+
+## 2026-10-11 — display.js: links to one review open the Reviews tab (for Pro RR-17)
+- `#ndvr-review-{id}` (the store-reply email's link): after load, open the WooCommerce Reviews tab when the review is
+  hidden or not on the first page, then scroll. Other hashes are left to WooCommerce. No API change.
+- TASKS: owner checks OC-10 (RR-17 real server and mail clients), OC-11 (Pro on a real free 1.0.0), OC-12 (RR-18 real upload).
+EVIDENCE: rr-16-js.mjs 24/24 (8 new); rr-16.php green.

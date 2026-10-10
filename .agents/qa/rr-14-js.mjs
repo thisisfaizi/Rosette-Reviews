@@ -132,6 +132,8 @@ function page( file, replies, cards = 1 ) {
 		},
 	};
 	ctx.window   = ctx;
+	ctx.location = { hash: '', search: '' };
+	ctx.addEventListener = () => {};
 	// Serialises named controls, like the browser's FormData( form ).
 	ctx.FormData = class {
 		constructor( f ) {

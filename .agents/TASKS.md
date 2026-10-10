@@ -18,6 +18,9 @@ These need a real browser, screen reader, store theme or legal judgement, which 
 | OC-7 | RR-10 (Pro) | Counsel confirms the list-campaign attestation and FTC wording | **release gate** |
 | OC-8 | website | Version shown vs next-release features; domain; WordPress.org links 404 until approval; About/Contact page | release gate |
 | OC-9 | QA hygiene | After any suite dies mid-run, run `.agents/qa/reset-qa.php` before trusting failures (stale Pro settings, webhook queue, rate-limit buckets) | process |
+| OC-10 | RR-17 (Pro) | On a real web server: the guest answer-email link (`?post_type=product&p=ID`) answers 301 to the product permalink (the harness checks `redirect_canonical()` in CLI); a real reply email and answer email in Gmail/Outlook (layout, unsubscribe link) | not a gate |
+| OC-11 | old free (Pro) | Pro on a real free 1.0.0 site (`git worktree add D:/.devcache/free-1.0.0 9059c7a`): RR-06P AC14, RR-17 AC13, RR-18 AC17 (the harnesses use an `NDVR_API` 3 child of the current free) | **release gate** |
+| OC-12 | RR-18 (Pro) | A real multipart upload (`curl -F` or a phone) to a web server: the production `media_handle_upload()` / `is_uploaded_file()` path (the harness uses the `NDVR_PRO_TESTING` sideload seam); an iPhone .mov and an Android .mp4 play on the card | **approval gate** |
 
 ## Done (shipped)
 | id | title | plugin | shipped |

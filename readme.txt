@@ -148,6 +148,7 @@ Only if you turn on "Remove all data on uninstall" in Settings. Reviews created 
 == Changelog ==
 
 = Unreleased =
+* A link to one review (for example from a store reply email) now opens the Reviews tab and scrolls to the review.
 * Database updates now run on any request, not only in the admin, under a lock, so scheduled emails never meet an old database. A failed update retries after an hour and shows a notice.
 * Reactivating after uploading a new version now runs pending database updates.
 * Uninstall (when you opt in to data removal) now removes every option, setting, meta key and scheduled job the plugin stores.

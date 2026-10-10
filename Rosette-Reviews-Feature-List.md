@@ -106,6 +106,10 @@ Pro:
   off stops queued emails; skipped when the store already sent one. Bulk campaigns ask each customer once and
   skip anyone emailed in 30 days. ESP pushes use the shared gate (consent, roles, unsubscribes).
 - List campaigns: CSV upload, preview with skip reasons, attestation and audit record, paced background sending.
+- Reply emails: "Email the reviewer" sends the store reply once per text, only to a trusted address (account email or
+  the review-request address); never for imported, store-added or external reviews. Link opens the review.
+- Answer emails: opt-in on the question form; one email per question for the first store answer (or any approved
+  answer); guests get a link only. Question form limited to 5 an hour per visitor.
 
 ## Not built (do not advertise)
 SMS/WhatsApp sequences (removed — needs approved templates, E.164, opt-in), per-category criteria

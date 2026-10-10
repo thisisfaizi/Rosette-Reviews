@@ -357,6 +357,33 @@
 		initForms();
 	}
 
+	// A link to one review (#ndvr-review-{id}, as in the store-reply email):
+	// WooCommerce opens the Reviews tab only for #reviews / #comment-*, so
+	// open it ourselves after its own tab init, then bring the review into
+	// view. A review on a later page isn't in the markup: the tab still opens.
+	function openReviewFromHash() {
+		var hash = window.location.hash;
+		if ( ! /^#ndvr-review-\d+$/.test( hash ) ) {
+			return;
+		}
+		var target = document.getElementById( hash.slice( 1 ) );
+		if ( ! target || target.offsetParent === null ) {
+			var tab = document.querySelector( '.reviews_tab a, #tab-title-reviews a' );
+			if ( tab ) {
+				tab.click();
+			}
+		}
+		target = target || document.querySelector( INSTANCE );
+		if ( target && target.offsetParent !== null && target.scrollIntoView ) {
+			target.scrollIntoView( { block: 'start' } );
+		}
+	}
+	if ( document.readyState === 'complete' ) {
+		setTimeout( openReviewFromHash, 0 );
+	} else {
+		window.addEventListener( 'load', function () { setTimeout( openReviewFromHash, 0 ); } );
+	}
+
 	// ── Photo lightbox ──────────────────────────────────────────────
 	// Keyboard-operable modal: Escape/overlay/close-button dismiss, Left/Right
 	// arrows step through the same review's photos, focus moves into the

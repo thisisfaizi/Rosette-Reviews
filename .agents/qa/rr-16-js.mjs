@@ -141,6 +141,8 @@ function page( file, { initial = '', typed = '' } = {} ) {
 		ndvrDisplay: { ajaxUrl: '/a', action: 'ndvr_list_reviews', nonce: 'n', i18n: { listError: 'Could not load.' } },
 	};
 	ctx.window   = ctx;
+	ctx.location = { hash: '', search: '' };
+	ctx.addEventListener = () => {};
 	ctx.FormData = class {
 		constructor() { this.d = new Map(); }
 		append( k, v ) { this.d.set( k, String( v ) ); }
@@ -247,6 +249,50 @@ for ( const file of [ 'display.js', 'display.min.js' ] ) {
 		await flush();
 		ok( 'Could not load.' === p.status.textContent, `${ file } m4: a network error during a search is announced` );
 	}
+}
+
+// RR-17 M1 (paired): #ndvr-review-{id} opens the WooCommerce Reviews tab after load.
+function anchorPage( file, hash, { present = true, hidden = true } = {} ) {
+	const onload = [];
+	const review = el( 'li', { attrs: { id: 'ndvr-review-7' } } );
+	review.offsetParent = hidden ? null : {};
+	const tab = el( 'a' );
+	tab.clicked = 0;
+	tab.click = () => {
+		tab.clicked++;
+		review.offsetParent = {};
+	};
+	const ctx = {
+		console,
+		setTimeout: ( fn ) => fn(),
+		ndvrDisplay: { ajaxUrl: '/a', i18n: {} },
+		location: { hash, search: '' },
+		addEventListener: ( t, fn ) => ( 'load' === t ? onload.push( fn ) : null ),
+	};
+	ctx.window   = ctx;
+	ctx.document = {
+		readyState: 'interactive',
+		addEventListener: () => {},
+		querySelectorAll: () => [],
+		querySelector: ( sel ) => ( sel.includes( 'reviews_tab' ) ? tab : null ),
+		getElementById: ( id ) => ( present && 'ndvr-review-7' === id ? review : null ),
+		createElement: ( t ) => el( t ),
+		body: el( 'body' ),
+	};
+	vm.createContext( ctx );
+	vm.runInContext( readFileSync( join( root, 'assets/js', file ), 'utf8' ), ctx );
+	onload.forEach( ( fn ) => fn() );
+	return { review, tab };
+}
+for ( const file of [ 'display.js', 'display.min.js' ] ) {
+	let a = anchorPage( file, '#ndvr-review-7' );
+	ok( 1 === a.tab.clicked && 1 === a.review.scrolled, `${ file } RR-17: #ndvr-review-{id} in a hidden tab opens the Reviews tab and scrolls to the review` );
+	a = anchorPage( file, '#ndvr-review-7', { hidden: false } );
+	ok( 0 === a.tab.clicked && 1 === a.review.scrolled, `${ file } RR-17: a visible review is only scrolled to` );
+	a = anchorPage( file, '#ndvr-review-7', { present: false } );
+	ok( 1 === a.tab.clicked, `${ file } RR-17: a review on a later page still opens the Reviews tab` );
+	a = anchorPage( file, '#description' );
+	ok( 0 === a.tab.clicked && 0 === a.review.scrolled, `${ file } RR-17: other hashes are left to WooCommerce` );
 }
 
 console.log( `RESULT: ${ fail ? 'FAIL' : 'PASS' } (${ pass } passed, ${ fail } failed)` );
