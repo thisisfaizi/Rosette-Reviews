@@ -868,3 +868,7 @@ cases); all suites green; debug.log empty; phpcs clean on the changed files.
   the rr-00b/rr-01 failures, which were not code regressions.
 EVIDENCE: rr-13 42/42 (19 new checks, 2 always-pass assertions fixed); all 17 suites green; debug.log empty; phpcs: no
 new issues (remaining hits are pre-RR-13 lines). No browser check (gap 13): the owner does it before release.
+- RR-13 follow-up: the rewritten widget code now has runtime evidence. `.agents/qa/rr-13-js.mjs` runs the shipped
+  reviews.js / collect.js (and .min) in a node vm sandbox (stub DOM, widgets, fetch, fake timers): 38 checks; a
+  mutation (token gate + busy guard off) fails 4. Wired into rr-13.php → 81/81. The owner's browser check with the
+  provider test keys remains the approval gate (real widgets).

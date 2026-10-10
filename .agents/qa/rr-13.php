@@ -88,6 +88,7 @@ final class NDVR_QA_RR13 {
 			$this->ac8_ac9();
 			$this->ac10();
 			$this->review_cases();
+			$this->js_lifecycle();
 		} catch ( \Throwable $e ) {
 			$this->ok( false, 'uncaught ' . get_class( $e ) . ': ' . $e->getMessage() . ' @ ' . basename( $e->getFile() ) . ':' . $e->getLine() );
 		}
@@ -716,6 +717,35 @@ final class NDVR_QA_RR13 {
 		delete_transient( \NdvReviews\Installer::BACKOFF_TRANSIENT );
 		\NdvReviews\Installer::maybe_upgrade();
 		$this->ok( 'recaptcha' === $mid && 'recaptcha' === AntiSpam::provider(), 'Gap 12: a Settings::update() from another screen before the upgrade step keeps reCAPTCHA' );
+	}
+
+	/**
+	 * The widget lifecycle of the shipped scripts (source and .min), run in
+	 * node by rr-13-js.mjs: each of its checks counts here.
+	 *
+	 * @return void
+	 */
+	private function js_lifecycle() {
+		$pipes = array();
+		$proc  = proc_open( array( 'node', __DIR__ . '/rr-13-js.mjs' ), array( array( 'pipe', 'r' ), array( 'pipe', 'w' ), array( 'pipe', 'w' ) ), $pipes );
+		if ( ! is_resource( $proc ) ) {
+			$this->ok( false, 'JS lifecycle: node could not be started' );
+			return;
+		}
+		fclose( $pipes[0] );
+		$out = (string) stream_get_contents( $pipes[1] );
+		$err = (string) stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		$code = proc_close( $proc );
+		$seen = 0;
+		foreach ( preg_split( '/\r?\n/', $out ) as $row ) {
+			if ( preg_match( '/^(PASS|FAIL): (.*)$/', $row, $m ) ) {
+				++$seen;
+				$this->ok( 'PASS' === $m[1], 'JS lifecycle: ' . $m[2] );
+			}
+		}
+		$this->ok( $seen > 0 && 0 === $code, 'JS lifecycle: rr-13-js.mjs ran ' . $seen . ' checks and exited ' . $code . ( '' !== trim( $err ) ? ' (' . trim( $err ) . ')' : '' ) );
 	}
 
 	/**
