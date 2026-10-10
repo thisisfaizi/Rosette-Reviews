@@ -36,6 +36,8 @@ class Reports implements Registerable {
 	const NONCE         = 'ndvr_report';
 	const META_COUNT    = '_ndvr_report_count';
 	const META_HELD     = '_ndvr_report_held';
+	const META_HELD_N   = '_ndvr_report_held_n';
+	const MAIL_COUNTER  = 'ndvr_report_mails';
 	const NOTE_MAX      = 300;
 	const THRESHOLD_MAX = 20;
 	const VIEW          = 'reported';
@@ -61,6 +63,13 @@ class Reports implements Registerable {
 	 * @var int|null
 	 */
 	private $open_total = null;
+
+	/**
+	 * Per-request prefix of the card ids (see render_button()).
+	 *
+	 * @var string|null
+	 */
+	private static $seed = null;
 
 	/**
 	 * Constructor.
@@ -91,6 +100,7 @@ class Reports implements Registerable {
 		add_filter( 'ndv-reviews/moderation_column_reports', array( $this, 'column_html' ), 10, 2 );
 		add_filter( 'ndv-reviews/moderation_row_actions', array( $this, 'row_action' ), 10, 2 );
 		add_action( 'ndv-reviews/moderation_handle_action', array( $this, 'handle_action' ), 10, 2 );
+		add_action( 'ndv-reviews/moderation_edit_fields', array( $this, 'edit_screen_reports' ) );
 		add_action( 'ndv-reviews/dashboard/after_kpis', array( $this, 'dashboard_chip' ) );
 		add_filter( 'ndv-reviews/transparency_sentences', array( $this, 'transparency' ) );
 
@@ -200,7 +210,7 @@ class Reports implements Registerable {
 				<option value="logged_in" <?php selected( 'logged_in', $value ); ?>><?php esc_html_e( 'Signed-in shoppers', 'rosette-reviews' ); ?></option>
 				<option value="verified" <?php selected( 'verified', $value ); ?>><?php esc_html_e( 'Signed-in shoppers who bought the product', 'rosette-reviews' ); ?></option>
 			</select>
-			<span class="description" id="ndvr-reports-who-help"><?php esc_html_e( 'Reports from guests are always kept for you to read, but don\'t count toward the hold.', 'rosette-reviews' ); ?></span>
+			<span class="description" id="ndvr-reports-who-help"><?php esc_html_e( 'Reports from guests are always kept for you to read, but don\'t count toward the hold. Anyone can create an account, so "who bought the product" is the safer choice.', 'rosette-reviews' ); ?></span>
 		</p>
 		<?php
 		// Without JS the select always shows; with JS only while the threshold is above 0.
@@ -271,8 +281,13 @@ class Reports implements Registerable {
 			return;
 		}
 
-		// Per card render: one review can show twice on a page (the tab and a list).
-		$base = 'ndvr-report-' . wp_unique_id( 'r' ) . '-' . $id;
+		// Per card render (one review can show twice on a page), and per request:
+		// wp_unique_id() restarts in every list AJAX response, which replaces
+		// cards next to ones rendered with the page.
+		if ( null === self::$seed ) {
+			self::$seed = strtolower( wp_generate_password( 6, false, false ) );
+		}
+		$base = 'ndvr-report-' . self::$seed . wp_unique_id( 'r' ) . '-' . $id;
 		?>
 		<button type="button" class="ndvr-report" aria-expanded="false" aria-controls="<?php echo esc_attr( $base ); ?>"><?php esc_html_e( 'Report', 'rosette-reviews' ); ?></button>
 		<form id="<?php echo esc_attr( $base ); ?>" class="ndvr-report-form" data-comment-id="<?php echo esc_attr( (string) $id ); ?>" hidden>
@@ -349,20 +364,26 @@ class Reports implements Registerable {
 
 		$result = $this->file( $comment, $reason, $note );
 		if ( is_wp_error( $result ) ) {
-			wp_send_json_error( array( 'message' => $result->get_error_message() ), 409 );
+			wp_send_json_error( array( 'message' => $result->get_error_message() ), 'ndvr_report_duplicate' === $result->get_error_code() ? 409 : 500 );
 		}
 
 		wp_send_json_success( array( 'message' => __( 'Thanks. We\'ll take a look.', 'rosette-reviews' ) ) );
 	}
 
 	/**
-	 * A published review on a reviewable, published, unprotected post.
+	 * A published, top-level review (not a reply, pingback or another plugin's
+	 * comment) on a reviewable, published, unprotected post.
 	 *
 	 * @param \WP_Comment $comment Comment.
 	 * @return bool
 	 */
 	private static function reportable( $comment ) {
-		if ( '1' !== (string) $comment->comment_approved ) {
+		if ( '1' !== (string) $comment->comment_approved || 0 !== (int) $comment->comment_parent ) {
+			return false;
+		}
+		// A review, or a legacy native one: type comment with a rating (as Moderation\Actions).
+		$type = (string) $comment->comment_type;
+		if ( 'review' !== $type && ( 'comment' !== $type || '' === (string) get_comment_meta( (int) $comment->comment_ID, 'rating', true ) ) ) {
 			return false;
 		}
 		$post = get_post( (int) $comment->comment_post_ID );
@@ -419,9 +440,14 @@ class Reports implements Registerable {
 				current_time( 'mysql', true )
 			)
 		);
+		if ( false === $inserted ) {
+			// A database error (a missing table, a read-only replica) is not a duplicate.
+			return new \WP_Error( 'ndvr_report_db', __( 'Your report could not be sent. Please try again.', 'rosette-reviews' ) );
+		}
 		if ( ! $inserted ) {
 			return new \WP_Error( 'ndvr_report_duplicate', __( 'You\'ve already reported this review.', 'rosette-reviews' ) );
 		}
+		$report_id = (int) $wpdb->insert_id;
 
 		$open = $this->sync_count( $id );
 		$held = false;
@@ -430,15 +456,23 @@ class Reports implements Registerable {
 		if ( $threshold > 0 ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			$counted = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM `{$table}` WHERE comment_id = %d AND status = 'open' AND counts = 1", $id ) );
-			if ( $counted >= $threshold && '1' === (string) get_comment( $id )->comment_approved ) {
+			$current = get_comment( $id );
+			if ( $counted >= $threshold && $current && '1' === (string) $current->comment_approved ) {
 				// Back to Pending (aggregates follow through transition_comment_status).
-				wp_set_comment_status( $id, 'hold' );
-				update_comment_meta( $id, self::META_HELD, current_time( 'mysql', true ) );
-				$held = true;
+				// Only the request whose update changed the row marks it held.
+				$held = true === wp_set_comment_status( $id, 'hold' );
+				if ( $held ) {
+					update_comment_meta( $id, self::META_HELD, current_time( 'mysql', true ) );
+					update_comment_meta( $id, self::META_HELD_N, $counted );
+				}
 			}
 		}
 
-		if ( 1 === $open ) {
+		// One email per open cycle, decided by identity (the oldest open report is
+		// this one), not by count: two reports at once can't both see "1".
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$first = (int) $wpdb->get_var( $wpdb->prepare( "SELECT MIN(id) FROM `{$table}` WHERE comment_id = %d AND status = 'open'", $id ) );
+		if ( $report_id > 0 && $first === $report_id ) {
 			$this->notify( $comment, $reason, $note );
 		}
 
@@ -497,6 +531,19 @@ class Reports implements Registerable {
 			return;
 		}
 
+		/**
+		 * Filter the most report emails the store gets per hour (a flood from many
+		 * addresses stays one hour's worth; the Reported view still lists all).
+		 *
+		 * @param int $max Default 20; 0 or less: no cap.
+		 */
+		$cap  = (int) apply_filters( 'ndv-reviews/report_emails_per_hour', 20 );
+		$sent = (int) get_transient( self::MAIL_COUNTER );
+		if ( $cap > 0 && $sent >= $cap ) {
+			return;
+		}
+		set_transient( self::MAIL_COUNTER, $sent + 1, HOUR_IN_SECONDS );
+
 		$reasons = self::reasons();
 		$store   = wp_specialchars_decode( (string) get_bloginfo( 'name' ), ENT_QUOTES );
 		/* translators: %s: store name. */
@@ -543,7 +590,8 @@ class Reports implements Registerable {
 	// ── Lifecycle ────────────────────────────────────────────────────────
 
 	/**
-	 * Approving a review (again) dismisses its open reports.
+	 * Approving a held or pending review dismisses its open reports. Restoring
+	 * one from Trash or Spam leaves them open (nobody decided anything).
 	 *
 	 * @param string      $new_status New status.
 	 * @param string      $old_status Old status.
@@ -551,7 +599,7 @@ class Reports implements Registerable {
 	 * @return void
 	 */
 	public function on_transition( $new_status, $old_status, $comment ) {
-		if ( 'approved' !== $new_status || 'approved' === $old_status || ! $comment instanceof \WP_Comment ) {
+		if ( 'approved' !== $new_status || 'unapproved' !== $old_status || ! $comment instanceof \WP_Comment ) {
 			return;
 		}
 		$id = (int) $comment->comment_ID;
@@ -561,6 +609,7 @@ class Reports implements Registerable {
 		}
 		$this->dismiss( $id );
 		delete_comment_meta( $id, self::META_HELD );
+		delete_comment_meta( $id, self::META_HELD_N );
 	}
 
 	/**
@@ -694,7 +743,8 @@ class Reports implements Registerable {
 	}
 
 	/**
-	 * Column cell: counts by reason, the notes, and when the review was held.
+	 * Column cell: counts by reason, the newest notes, when the review was
+	 * held, and a link to every report on the edit screen.
 	 *
 	 * @param string      $html Default ''.
 	 * @param \WP_Comment $item Review.
@@ -710,25 +760,16 @@ class Reports implements Registerable {
 			return (string) $html;
 		}
 
-		$out = '';
+		$out   = '';
+		$table = Db::table( 'review_reports' );
 		if ( $count > 0 ) {
-			$table = Db::table( 'review_reports' );
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$rows    = (array) $wpdb->get_results( $wpdb->prepare( "SELECT reason, note FROM `{$table}` WHERE comment_id = %d AND status = 'open' ORDER BY id ASC LIMIT 50", $id ) );
 			$reasons = self::reasons();
-			$by      = array();
-			$notes   = array();
-			foreach ( $rows as $row ) {
-				$label        = $reasons[ $row->reason ] ?? $row->reason;
-				$by[ $label ] = ( $by[ $label ] ?? 0 ) + 1;
-				if ( '' !== (string) $row->note && count( $notes ) < 5 ) {
-					$notes[] = mb_strlen( $row->note ) > 120 ? mb_substr( $row->note, 0, 119 ) . '…' : $row->note;
-				}
-			}
-			$parts = array();
-			foreach ( $by as $label => $n ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$groups = (array) $wpdb->get_results( $wpdb->prepare( "SELECT reason, COUNT(*) AS n FROM `{$table}` WHERE comment_id = %d AND status = 'open' GROUP BY reason ORDER BY n DESC, reason ASC", $id ) );
+			$parts  = array();
+			foreach ( $groups as $group ) {
 				/* translators: 1: report reason, 2: how many reports gave it. */
-				$parts[] = sprintf( __( '%1$s ×%2$s', 'rosette-reviews' ), $label, number_format_i18n( $n ) );
+				$parts[] = sprintf( __( '%1$s ×%2$s', 'rosette-reviews' ), $reasons[ $group->reason ] ?? $group->reason, number_format_i18n( (int) $group->n ) );
 			}
 			$out .= '<strong>' . esc_html(
 				sprintf(
@@ -738,21 +779,95 @@ class Reports implements Registerable {
 					implode( ', ', $parts )
 				)
 			) . '</strong>';
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$notes = (array) $wpdb->get_col( $wpdb->prepare( "SELECT note FROM `{$table}` WHERE comment_id = %d AND status = 'open' AND note <> '' ORDER BY id DESC LIMIT 5", $id ) );
 			foreach ( $notes as $note ) {
-				$out .= '<br><span class="ndvr-report-note">“' . esc_html( $note ) . '”</span>';
+				$note = (string) $note;
+				$out .= '<br><span class="ndvr-report-note">“' . esc_html( mb_strlen( $note ) > 120 ? mb_substr( $note, 0, 119 ) . '…' : $note ) . '”</span>';
 			}
 		}
 		if ( '' !== $held ) {
+			$n    = (int) get_comment_meta( $id, self::META_HELD_N, true );
+			$date = wp_date( (string) get_option( 'date_format' ), (int) strtotime( $held . ' UTC' ) );
 			$out .= '<br><em>' . esc_html(
-				sprintf(
+				$n > 0
+					/* translators: 1: number of reports, 2: date the review was held. */
+					? sprintf( _n( 'Held after %1$s report on %2$s', 'Held after %1$s reports on %2$s', $n, 'rosette-reviews' ), number_format_i18n( $n ), $date )
 					/* translators: %s: date the review was held. */
-					__( 'Held after reports on %s', 'rosette-reviews' ),
-					wp_date( (string) get_option( 'date_format' ), (int) strtotime( $held . ' UTC' ) )
-				)
+					: sprintf( __( 'Held after reports on %s', 'rosette-reviews' ), $date )
 			) . '</em>';
 		}
+		$edit = add_query_arg(
+			array(
+				'page'        => ModerationPage::PAGE_SLUG,
+				'ndvr_action' => 'edit',
+				'review'      => $id,
+			),
+			admin_url( 'admin.php' )
+		);
+		$out .= '<br><a href="' . esc_url( $edit . '#ndvr-reports' ) . '">' . esc_html__( 'See all reports', 'rosette-reviews' ) . '</a>';
 
 		return $out;
+	}
+
+	/**
+	 * Every report on the review's edit screen (a table row inside the edit
+	 * form's table): reason, the full note, who, when, open or dismissed.
+	 *
+	 * @param \WP_Comment $comment Review.
+	 * @return void
+	 */
+	public function edit_screen_reports( $comment ) {
+		global $wpdb;
+
+		if ( ! $comment instanceof \WP_Comment || ! Installer::is_current( Installer::V_REPORTS ) ) {
+			return;
+		}
+		$table = Db::table( 'review_reports' );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT reason, note, user_id, counts, status, created_at FROM `{$table}` WHERE comment_id = %d ORDER BY id DESC LIMIT 100", (int) $comment->comment_ID ) );
+		if ( ! $rows ) {
+			return;
+		}
+		$reasons = self::reasons();
+		$format  = get_option( 'date_format' ) . ' ' . get_option( 'time_format' );
+		?>
+		<tr id="ndvr-reports">
+			<th scope="row"><?php esc_html_e( 'Reports', 'rosette-reviews' ); ?></th>
+			<td>
+				<ul class="ndvr-report-list" style="margin:0;">
+					<?php foreach ( $rows as $row ) : ?>
+						<li style="margin:0 0 10px;">
+							<strong><?php echo esc_html( $reasons[ $row->reason ] ?? (string) $row->reason ); ?></strong>
+							<span class="description">
+								<?php
+								echo esc_html(
+									implode(
+										' · ',
+										array_filter(
+											array(
+												wp_date( $format, (int) strtotime( $row->created_at . ' UTC' ) ),
+												(int) $row->user_id > 0 ? __( 'signed-in shopper', 'rosette-reviews' ) : __( 'guest', 'rosette-reviews' ),
+												(int) $row->counts ? __( 'counts toward the hold', 'rosette-reviews' ) : '',
+												'open' === $row->status ? __( 'open', 'rosette-reviews' ) : __( 'dismissed', 'rosette-reviews' ),
+											)
+										)
+									)
+								);
+								?>
+							</span>
+							<?php if ( '' !== (string) $row->note ) : ?>
+								<br><?php echo nl2br( esc_html( (string) $row->note ) ); ?>
+							<?php endif; ?>
+						</li>
+					<?php endforeach; ?>
+				</ul>
+				<?php if ( 100 === count( $rows ) ) : ?>
+					<p class="description"><?php esc_html_e( 'The 100 newest reports are shown.', 'rosette-reviews' ); ?></p>
+				<?php endif; ?>
+			</td>
+		</tr>
+		<?php
 	}
 
 	/**
@@ -765,7 +880,13 @@ class Reports implements Registerable {
 	public function row_action( $actions, $item ) {
 		$actions = (array) $actions;
 		if ( $item instanceof \WP_Comment && (int) get_comment_meta( (int) $item->comment_ID, self::META_COUNT, true ) > 0 ) {
-			$actions[ self::ACTION ] = sprintf( '<a href="%s">%s</a>', esc_url( ModerationPage::row_action_url( self::ACTION, (int) $item->comment_ID ) ), esc_html__( 'Dismiss reports', 'rosette-reviews' ) );
+			$url = ModerationPage::row_action_url( self::ACTION, (int) $item->comment_ID );
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- the list's own view, carried back.
+			$view = isset( $_GET['status'] ) ? sanitize_key( wp_unslash( $_GET['status'] ) ) : '';
+			if ( '' !== $view ) {
+				$url = add_query_arg( 'status', $view, $url );
+			}
+			$actions[ self::ACTION ] = sprintf( '<a href="%s">%s</a>', esc_url( $url ), esc_html__( 'Dismiss reports', 'rosette-reviews' ) );
 		}
 
 		return $actions;
@@ -828,9 +949,9 @@ class Reports implements Registerable {
 
 		$sentences['reports'] = 'verified' === self::sanitize_who( $this->settings->get( 'reports_hold_who', 'logged_in' ) )
 			/* translators: %d: number of reports. */
-			? sprintf( __( 'Shoppers can report a review. After %d reports from signed-in shoppers who bought the product, a review is hidden until we check it. We don\'t remove reviews because they are negative.', 'rosette-reviews' ), $threshold )
+			? sprintf( _n( 'Shoppers can report a review. After %d report from a signed-in shopper who bought the product, a review is hidden until we check it.', 'Shoppers can report a review. After %d reports from signed-in shoppers who bought the product, a review is hidden until we check it.', $threshold, 'rosette-reviews' ), $threshold )
 			/* translators: %d: number of reports. */
-			: sprintf( __( 'Shoppers can report a review. After %d reports from signed-in shoppers, a review is hidden until we check it. We don\'t remove reviews because they are negative.', 'rosette-reviews' ), $threshold );
+			: sprintf( _n( 'Shoppers can report a review. After %d report from a signed-in shopper, a review is hidden until we check it.', 'Shoppers can report a review. After %d reports from signed-in shoppers, a review is hidden until we check it.', $threshold, 'rosette-reviews' ), $threshold );
 
 		return $sentences;
 	}

@@ -539,10 +539,14 @@ button.ndvr-bar-row.is-current .ndvr-bar-track { background: var(--ndvr-line); }
 	font-weight: 600;
 	cursor: pointer;
 }
-.ndvr-report-send { background: var(--ndvr-ink); border-color: var(--ndvr-ink); color: var(--ndvr-paper); }
+.ndvr-report-send { background: var(--ndvr-accent); border-color: var(--ndvr-accent); color: var(--ndvr-accent-ink); }
 .ndvr-report-send[disabled] { opacity: 0.6; cursor: default; }
 .ndvr-report-status { font-size: 0.8em; color: var(--ndvr-slate); }
-.ndvr-report-status:empty { display: none; }
+/* Empty: collapsed but still in the accessibility tree (a live region must
+   exist before its text changes). */
+.ndvr-report-status:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* While a report form is open, the footer takes the card's full width. */
+.ndvr-review > .ndvr-review-foot.is-reporting { flex-basis: 100%; }
 
 .ndvr-no-reviews { color: var(--ndvr-slate); padding: 28px 0; margin: 0; text-align: center; }
 

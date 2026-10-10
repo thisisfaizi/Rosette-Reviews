@@ -11,6 +11,7 @@ use NdvReviews\Support\Registerable;
 use NdvReviews\Support\Settings;
 use NdvReviews\Support\View;
 use NdvReviews\Reviews\ReviewQuery;
+use NdvReviews\Reviews\Reports;
 use NdvReviews\Reviews\Votes;
 
 defined( 'ABSPATH' ) || exit;
@@ -120,8 +121,8 @@ class Renderer implements Registerable {
 				'action'       => self::AJAX_ACTION,
 				'nonce'        => wp_create_nonce( self::NONCE ),
 				'voteAction'   => Votes::AJAX_ACTION,
-				'reportAction' => \NdvReviews\Reviews\Reports::AJAX_ACTION,
-				'reportNonce'  => wp_create_nonce( \NdvReviews\Reviews\Reports::NONCE ),
+				'reportAction' => Reports::AJAX_ACTION,
+				'reportNonce'  => wp_create_nonce( Reports::NONCE ),
 				'i18n'         => array(
 					'photo'           => __( 'Customer photo', 'rosette-reviews' ),
 					'close'           => __( 'Close', 'rosette-reviews' ),

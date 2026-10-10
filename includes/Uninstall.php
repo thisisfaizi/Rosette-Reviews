@@ -78,6 +78,7 @@ final class Uninstall {
 				'_ndvr_answers',
 				'_ndvr_report_count',
 				'_ndvr_report_held',
+				'_ndvr_report_held_n',
 				'_ndvr_pending_edit',
 				'_ndvr_edited_at',
 				'_ndvr_edit_discarded',

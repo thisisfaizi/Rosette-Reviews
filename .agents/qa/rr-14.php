@@ -107,6 +107,7 @@ final class NDVR_QA_RR14 {
 			$this->ac15_ac16();
 			$this->ac17();
 			$this->admin();
+			$this->review_fixes();
 			$this->js();
 		} catch ( \Throwable $e ) {
 			$this->ok( false, 'uncaught ' . get_class( $e ) . ': ' . $e->getMessage() . ' @ ' . basename( $e->getFile() ) . ':' . $e->getLine() );
@@ -185,6 +186,7 @@ final class NDVR_QA_RR14 {
 				$this->draft = $id;
 			}
 		}
+		delete_transient( Reports::MAIL_COUNTER );
 		wp_set_current_user( 1 );
 	}
 
@@ -386,11 +388,11 @@ final class NDVR_QA_RR14 {
 	private function ac2_ac3() {
 		$review      = $this->review();
 		$this->mails = array();
-		$res         = $this->report( $review, 0, '10.14.1.1', array( 'note' => "Looks <b>copied</b>\nfrom elsewhere" ) );
+		$res         = $this->report( $review, 0, '10.14.1.1', array( 'note' => "Looks copied: 5 > 3 & \"quotes\"\nfrom elsewhere" ) );
 		$rows        = $this->rows( $review );
 		$this->ok( ! empty( $res['success'] ) && 1 === count( $rows ) && 0 === (int) $rows[0]->user_id && wp_hash( '10.14.1.1' ) === $rows[0]->ip_hash && 'spam' === $rows[0]->reason && 1 === (int) get_comment_meta( $review, Reports::META_COUNT, true ), 'AC2: a guest report stores one row (user 0, IP hash) and _ndvr_report_count 1' );
 		$mail = $this->mails[0] ?? array();
-		$this->ok( 1 === count( $this->mails ) && false !== strpos( (string) ( $mail['subject'] ?? '' ), 'A review was reported' ) && false !== strpos( (string) ( $mail['message'] ?? '' ), 'Spam or fake' ) && false === strpos( (string) ( $mail['message'] ?? '' ), '<b>copied' ), 'AC2: one admin email with the reason; the note arrives escaped' );
+		$this->ok( 1 === count( $this->mails ) && false !== strpos( (string) ( $mail['subject'] ?? '' ), 'A review was reported' ) && false !== strpos( (string) ( $mail['message'] ?? '' ), 'Spam or fake' ) && false !== strpos( (string) ( $mail['message'] ?? '' ), '5 &gt; 3 &amp; &quot;quotes&quot;' ) && 'Looks copied: 5 > 3 & "quotes"' . "\nfrom elsewhere" === $rows[0]->note, 'AC2 (gap 4): one admin email with the reason; the note is stored as typed and arrives escaped' );
 
 		$res2 = $this->report( $review, 0, '10.14.1.1' );
 		$code = $this->status;
@@ -595,7 +597,11 @@ final class NDVR_QA_RR14 {
 				'reports_hold_who'  => 'logged_in',
 			)
 		);
-		$this->ok( ! isset( $off['reports'] ) && 'Shoppers can report a review. After 4 reports from signed-in shoppers, a review is hidden until we check it. We don\'t remove reviews because they are negative.' === ( $in['reports'] ?? '' ) && 'Shoppers can report a review. After 4 reports from signed-in shoppers who bought the product, a review is hidden until we check it. We don\'t remove reviews because they are negative.' === ( $ve['reports'] ?? '' ), 'AC14: the reports sentence is absent at threshold 0 and exactly the §8 variant otherwise' );
+		$this->ok( ! isset( $off['reports'] ) && 'Shoppers can report a review. After 4 reports from signed-in shoppers, a review is hidden until we check it.' === ( $in['reports'] ?? '' ) && 'Shoppers can report a review. After 4 reports from signed-in shoppers who bought the product, a review is hidden until we check it.' === ( $ve['reports'] ?? '' ), 'AC14 (m5): the reports sentence is absent at threshold 0 and exactly the §8 variant otherwise (no repeat of the moderation sentence)' );
+		$this->set( array( 'reports_threshold' => 1 ) );
+		$one = (array) $t->sentences( $this->p );
+		$this->set( array( 'reports_threshold' => 0 ) );
+		$this->ok( 'Shoppers can report a review. After 1 report from a signed-in shopper, a review is hidden until we check it.' === ( $one['reports'] ?? '' ), 'AC14 (m5): threshold 1 reads "After 1 report from a signed-in shopper"' );
 	}
 
 	/**
@@ -690,8 +696,180 @@ final class NDVR_QA_RR14 {
 		$this->r()->dashboard_chip();
 		$chip = (string) ob_get_clean();
 		$this->ok( in_array( $review, $ids, true ) && 'Reported' === ( $view['label'] ?? '' ) && isset( $cols['reports'] ) && array_search( 'reports', array_keys( $cols ), true ) < array_search( 'date', array_keys( $cols ), true ), 'Admin: the Reported view lists the review; the Reports column sits before Date' );
-		$this->ok( false !== strpos( $cell, '2 reports: Spam or fake ×1, Off-topic ×1' ) && false !== strpos( $cell, str_repeat( 'n', 119 ) . '…' ) && false === strpos( $cell, str_repeat( 'n', 121 ) ), 'Admin: the cell counts by reason and truncates notes to 120 characters' );
+		$this->ok( false !== strpos( $cell, '2 reports: Off-topic ×1, Spam or fake ×1' ) && false !== strpos( $cell, str_repeat( 'n', 119 ) . '…' ) && false === strpos( $cell, str_repeat( 'n', 121 ) ), 'Admin: the cell counts by reason and truncates notes to 120 characters' );
 		$this->ok( isset( $acts[ Reports::ACTION ] ) && false !== strpos( $acts[ Reports::ACTION ], '_wpnonce=' ) && false !== strpos( $chip, 'Reported: ' ) && false !== strpos( $chip, 'status=' . Reports::VIEW ), 'Admin: a nonced Dismiss reports row action, and the Overview chip links to the view' );
+	}
+
+	/**
+	 * Code review RR-14 (reviews/code-RR-14.md): M1–M4, m1–m7 and harness gaps.
+	 *
+	 * @return void
+	 */
+	private function review_fixes() {
+		global $wpdb;
+
+		// M1 (gap 1): ids are unique per request too (a list AJAX restarts wp_unique_id()).
+		$review = $this->review();
+		$seed   = new \ReflectionProperty( Reports::class, 'seed' );
+		$seed->setAccessible( true );
+		preg_match( '/aria-controls="(ndvr-report-([a-z0-9]{6})r\d+-\d+)"/', $this->card( $review ), $a );
+		$first = $a[2] ?? '';
+		preg_match( '/aria-controls="ndvr-report-([a-z0-9]{6})r/', $this->card( $review ), $same );
+		$seed->setValue( null, null ); // A new request.
+		preg_match( '/aria-controls="ndvr-report-([a-z0-9]{6})r/', $this->card( $review ), $next );
+		$this->ok( '' !== $first && $first === ( $same[1] ?? '' ) && $first !== ( $next[1] ?? '' ), 'M1: the id base carries a per-request prefix (stable within a request, new for the next one: ' . $first . ' / ' . ( $next[1] ?? '' ) . ')' );
+
+		// The list AJAX response renders cards with report buttons too.
+		$_POST    = array(
+			'nonce'      => wp_create_nonce( \NdvReviews\Display\Renderer::NONCE ),
+			'product_id' => (string) $this->p,
+		);
+		$_REQUEST = $_POST;
+		$die      = static function () {
+			return static function () {
+				throw new NDVR_QA_14_Die();
+			};
+		};
+		$ajax     = static function () {
+			return true;
+		};
+		add_filter( 'wp_die_ajax_handler', $die );
+		add_filter( 'wp_doing_ajax', $ajax );
+		ob_start();
+		try {
+			$this->c()->get( 'renderer' )->ajax_list();
+		} catch ( NDVR_QA_14_Die $e ) {
+			unset( $e );
+		}
+		$json = json_decode( (string) ob_get_clean(), true );
+		remove_filter( 'wp_die_ajax_handler', $die );
+		remove_filter( 'wp_doing_ajax', $ajax );
+		$_POST    = array();
+		$_REQUEST = array();
+		$list     = (string) ( $json['data']['html'] ?? '' );
+		$this->ok( false !== strpos( $list, 'class="ndvr-report"' ) && 1 === preg_match( '/id="ndvr-report-[a-z0-9]{6}r\d+-\d+"/', $list ), 'M1 (gap 1): the list AJAX renders report forms with the per-request id base' );
+
+		// M3 (gap 5): replies, pingbacks and other comment types can't be reported.
+		$reply = (int) wp_insert_comment(
+			array(
+				'comment_post_ID'  => $this->p,
+				'comment_type'     => 'review',
+				'comment_parent'   => $review,
+				'comment_approved' => 1,
+				'comment_content'  => 'The store answers.',
+				'user_id'          => 1,
+			)
+		);
+		$ping  = (int) wp_insert_comment(
+			array(
+				'comment_post_ID'  => $this->p,
+				'comment_type'     => 'pingback',
+				'comment_approved' => 1,
+				'comment_content'  => 'A pingback.',
+			)
+		);
+		$plain = (int) wp_insert_comment(
+			array(
+				'comment_post_ID'  => $this->p,
+				'comment_type'     => 'comment',
+				'comment_approved' => 1,
+				'comment_content'  => 'A comment without a rating.',
+			)
+		);
+		$this->fx['comments'] = array_merge( $this->fx['comments'], array( $reply, $ping, $plain ) );
+		$codes                = array();
+		foreach ( array( $reply, $ping, $plain ) as $i => $cid ) {
+			$this->report( $cid, 0, '10.14.30.' . $i );
+			$codes[] = $this->status;
+		}
+		update_comment_meta( $plain, 'rating', 4 );
+		$res   = $this->report( $plain, 0, '10.14.30.9' );
+		$rated = ! empty( $res['success'] ) ? 'ok' : (string) $this->status;
+		$this->ok( array( 404, 404, 404 ) === $codes && 'ok' === $rated && ! $this->rows( $reply ) && ! $this->rows( $ping ), 'M3: a reply, a pingback and an unrated comment answer 404; a legacy rated comment can be reported (' . implode( '/', $codes ) . ', ' . $rated . ')' );
+
+		// M4: every report, with its full note, on the edit screen; the column links to it.
+		$long = str_repeat( 'Personal details are in line two. ', 8 );
+		$this->report( $review, 0, '10.14.31.1', array( 'reason' => 'personal', 'note' => $long ) );
+		ob_start();
+		$this->r()->edit_screen_reports( get_comment( $review ) );
+		$box  = (string) ob_get_clean();
+		$cell = (string) apply_filters( 'ndv-reviews/moderation_column_reports', '', get_comment( $review ) );
+		$this->ok( false !== strpos( $box, 'id="ndvr-reports"' ) && false !== strpos( $box, esc_html( mb_substr( trim( $long ), 0, 300 ) ) ) && false !== strpos( $box, 'guest' ) && false !== strpos( $box, 'Contains personal information' ) && false !== strpos( $cell, 'See all reports' ) && false !== strpos( $cell, '#ndvr-reports' ), 'M4: the edit screen lists each report with the full note, who and when; the column links to it' );
+
+		// m1 (gap 9): a database error isn't reported as a duplicate.
+		// The insert fails as it would on a missing table or a read-only replica.
+		$broken   = static function ( $q ) {
+			return false !== strpos( $q, 'INSERT IGNORE INTO' ) && false !== strpos( $q, 'review_reports' ) ? 'INSERT INTO `ndvr_qa_missing_table` (x) VALUES (1)' : $q;
+		};
+		$target   = $this->review();
+		add_filter( 'query', $broken );
+		$suppress = $wpdb->suppress_errors( true );
+		$this->report( $target, 0, '10.14.32.1' );
+		$db_code = $this->status;
+		$wpdb->suppress_errors( $suppress );
+		remove_filter( 'query', $broken );
+		$this->ok( 500 === $db_code, 'm1: a database error answers 500, not 409 (' . $db_code . ')' );
+
+		// m2: exactly one email per open cycle; admin_notify off sends none.
+		$r2          = $this->review();
+		$this->mails = array();
+		delete_transient( Reports::MAIL_COUNTER ); // Earlier cases used up the hourly cap.
+		$this->report( $r2, 0, '10.14.33.1' );
+		$this->report( $r2, 0, '10.14.33.2' );
+		$one = count( $this->mails );
+		$this->set( array( 'admin_notify' => 'off' ) );
+		$r3 = $this->review();
+		$this->report( $r3, 0, '10.14.33.3' );
+		$this->set( array( 'admin_notify' => 'pending' ) );
+		$this->ok( 1 === $one && 1 === count( $this->mails ), 'm2: two reports on one review send one email; admin_notify off sends none' );
+
+		// m3: the held line carries the count.
+		$this->set( array( 'reports_threshold' => 2 ) );
+		$r4 = $this->review();
+		foreach ( array( $this->user(), $this->user() ) as $i => $u ) {
+			$this->report( $r4, $u, '10.14.34.' . $i );
+		}
+		$cell = (string) apply_filters( 'ndv-reviews/moderation_column_reports', '', get_comment( $r4 ) );
+		$this->set( array( 'reports_threshold' => 0 ) );
+		$this->ok( 'unapproved' === $this->state( $r4 ) && 2 === (int) get_comment_meta( $r4, Reports::META_HELD_N, true ) && false !== strpos( $cell, 'Held after 2 reports on' ), 'm3: a held review says "Held after 2 reports on …"' );
+
+		// m6: restoring from Trash keeps the reports open; approving a held one dismisses them.
+		$r5 = $this->review();
+		$this->report( $r5, 0, '10.14.35.1' );
+		wp_trash_comment( $r5 );
+		wp_untrash_comment( $r5 );
+		$kept = count( $this->rows( $r5, 'open' ) );
+		wp_spam_comment( $r5 );
+		wp_unspam_comment( $r5 );
+		$this->ok( 1 === $kept && 1 === count( $this->rows( $r5, 'open' ) ) && 'approved' === $this->state( $r5 ), 'm6: Trash → Restore and Spam → Not spam leave the open reports alone' );
+
+		// m7: Dismiss from the Reported view returns to it.
+		$_GET = array( 'status' => Reports::VIEW );
+		$acts = apply_filters( 'ndv-reviews/moderation_row_actions', array(), get_comment( $r5 ) );
+		$_GET = array();
+		$this->ok( isset( $acts[ Reports::ACTION ] ) && false !== strpos( $acts[ Reports::ACTION ], 'status=' . Reports::VIEW ), 'm7: the Dismiss reports link carries the current view' );
+
+		// Gap 6: the real page dispatch with a valid nonce (redirect caught).
+		$_GET     = array(
+			'page'        => \NdvReviews\Moderation\Page::PAGE_SLUG,
+			'ndvr_action' => Reports::ACTION,
+			'review'      => (string) $r5,
+			'_wpnonce'    => wp_create_nonce( 'ndvr_review_action' ),
+		);
+		$_REQUEST = $_GET;
+		$redir    = static function () {
+			throw new NDVR_QA_14_Die( 'redirect' );
+		};
+		add_filter( 'wp_redirect', $redir, 1 );
+		try {
+			$this->c()->get( 'moderation_page' )->handle_actions();
+		} catch ( NDVR_QA_14_Die $e ) {
+			unset( $e );
+		}
+		remove_filter( 'wp_redirect', $redir, 1 );
+		$_GET     = array();
+		$_REQUEST = array();
+		$this->ok( ! $this->rows( $r5, 'open' ) && 'approved' === $this->state( $r5 ), 'Gap 6: Dismiss reports through Moderation\Page with a valid nonce closes them and keeps the status' );
 	}
 
 	/**
@@ -751,6 +929,7 @@ final class NDVR_QA_RR14 {
 			update_option( NDVR_OPTION_SETTINGS, $this->saved['free'] );
 		}
 		update_option( NDVR_OPTION_DB_VERSION, (string) max( (int) $this->saved['version'], Installer::V_REPORTS ), true );
+		delete_transient( Reports::MAIL_COUNTER );
 		global $wpdb;
 		$wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '\\_transient\\_ndvr\\_rl\\_%' OR option_name LIKE '\\_transient\\_timeout\\_ndvr\\_rl\\_%'" );
 		$this->line( 'cleanup: fixtures removed, settings restored' );

@@ -327,3 +327,8 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   Nonces `ndvr_edit_review_{id}`, `ndvr_pending_edit_{id}` (+ hidden `ndvr_pending_submitted_at`). F7 bucket `edit_u{user_id}`
   (20/h). F4 view `edits_pending`, row action `check_edit`. Transparency key `edits` (fact `edit_invites`). Exporter/eraser
   `ndv-reviews-edits`.
+- RR-14 rev 6: card id base `ndvr-report-{seed}{n}-{id}` (seed per request); display.js scopes to `.ndvr-review-foot`
+  (footer gets `.is-reporting` while open). Only top-level reviews (type review, or comment + rating) are reportable.
+  Meta `_ndvr_report_held_n` (count when held). Transient `ndvr_report_mails` + filter `ndv-reviews/report_emails_per_hour`
+  (20). Reports are dismissed only on unapproved → approved. `edit_screen_reports()` on `moderation_edit_fields`
+  (`#ndvr-reports`). AJAX: duplicate 409, database error 500.

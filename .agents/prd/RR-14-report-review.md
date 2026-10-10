@@ -1,6 +1,25 @@
 # RR-14: Report a review
 
-Status: building (rev 5) · Plan: F · Inherits PRD-00 + RR-00 · **Schema `Installer::V_REPORTS` = 7** (after RR-11's `V_FIELDS` = 6) · No Pro-facing API, so no `NDVR_API` change (stays 8; RR-15 takes 9)
+Status: done (rev 6); browser/screen-reader check pending (§13.7) · Plan: F · Inherits PRD-00 + RR-00 · **Schema `Installer::V_REPORTS` = 7** (after RR-11's `V_FIELDS` = 6) · No Pro-facing API, so no `NDVR_API` change (stays 8; RR-15 takes 9)
+
+Rev 6 (code review `reviews/code-RR-14.md`, 0 blockers, 4 majors, 12 minors):
+- **M1:** card ids are `ndvr-report-{seed}{n}-{id}`, where `seed` is a per-request random prefix (`Reports::$seed`), because every list AJAX response restarts `wp_unique_id()`. display.js resolves the button, form and status inside the card's `.ndvr-review-foot`, never page-wide; `aria-controls` stays for assistive technology.
+- **M2:** the status line stays in the accessibility tree: it is collapsed visually while empty, not `display:none`. Messages are cleared and then written on the next tick, so a repeated one announces again.
+- **M3:** only top-level reviews can be reported: type `review`, or a legacy `comment` with a rating, and `comment_parent = 0`. Replies, pingbacks and other comment types answer 404.
+- **M4:** the review's edit screen lists every report (the newest 100) with the full note, the date, guest or signed-in, whether it counted, and open or dismissed (`moderation_edit_fields`, row `#ndvr-reports`). The column links to it.
+- **m1:** a failed insert is a 500 "could not be sent"; only 0 rows (a duplicate) is the 409.
+- **m2:** one email per open cycle, decided by identity (the request whose insert is the oldest open report sends it). `_ndvr_report_held` (and the new `_ndvr_report_held_n`) are set only when `wp_set_comment_status()` really changed the review.
+- **m3:** "Held after %s reports on {date}" (count from `_ndvr_report_held_n`, in the uninstall registry).
+- **m4:** the breakdown is a `GROUP BY reason` over every open report (by count, then slug); the column shows the 5 newest notes.
+- **m5 (§8 changed):** both sentences use `_n()` ("After 1 report from a signed-in shopper") and no longer end with "We don't remove reviews because they are negative.", which the `moderation` sentence already says.
+- **m6 (decision):** reports are dismissed only when a moderator approves a held or pending review (`unapproved` → `approved`). Restoring from Trash or Spam leaves them open.
+- **m7:** Dismiss reports keeps the current view (`status` carried on the row-action link).
+- **m8:** the help text recommends "who bought the product" (anyone can create accounts). A site-wide cap of 20 report emails an hour (`ndv-reviews/report_emails_per_hour`, transient `ndvr_report_mails`) stops an email flood. With "who bought", a buyer of a pool sibling doesn't count (the check uses the review's own product): accepted.
+- **m9:** the footer takes the card's full width while a form is open (`.is-reporting`), and Send uses the accent tokens.
+- **m10:** opening a form clears the old status. A reply that arrives after the list AJAX replaced the card touches nothing. The Report button isn't disabled after success, because a disabled button can't take the returned focus; a second report gets the 409 message.
+- **m11:** readme copy (uninstall wording, the email wording), and a `use` statement in Renderer. The POT is regenerated at release.
+- **m12:** Pro task RR-14P-4: AI auto-publish must skip held reviews. RR-14P-1 in §5 was wrong: Pro's AI `enrich()` can re-approve.
+- **Harness:** gaps 1–6 and 9 closed, plus the m2, m3, m6 and m7 cases. rr-14 59/59, with 18 node checks: two cards sharing ids, and FormData serialised. A mutation run of the old display.js fails the M1 case.
 
 Rev 5 (reconciled with the code after RR-11 to RR-13, before building):
 - **Schema:** `V_REPORTS` is 7 and `NDVR_DB_VERSION` becomes 7. No upgrade step: dbDelta creates the table.
@@ -133,8 +152,9 @@ Output: reasons, notes and names are `esc_html`'d in the column and the email (t
 - **Rating independence (F8.2, PRD-00 §2.17):** the hold never reads the rating; a 5★ and a 1★ review behave the same.
 - **Re-approval:** a `transition_comment_status` listener (old status not `approved`, new `approved`) sets every open report on that review to `dismissed`, resets `_ndvr_report_count` to 0 and deletes `_ndvr_report_held`. The same reports can't hold it again. New reports start a new count.
 - **Transparency sentence (canonical; RR-03 references this text and adds no copy of its own)** (key `reports`, via `ndv-reviews/transparency_sentences`, only when `reports_enabled` and `reports_threshold` > 0; with threshold 0 the key is absent, because reports never hide anything):
-  - `logged_in`: "Shoppers can report a review. After %d reports from signed-in shoppers, a review is hidden until we check it. We don't remove reviews because they are negative."
-  - `verified`: "Shoppers can report a review. After %d reports from signed-in shoppers who bought the product, a review is hidden until we check it. We don't remove reviews because they are negative."
+  - `logged_in` (rev 6, `_n()`): "Shoppers can report a review. After %d report from a signed-in shopper, a review is hidden until we check it." / "… After %d reports from signed-in shoppers, a review is hidden until we check it."
+  - `verified` (rev 6, `_n()`): "Shoppers can report a review. After %d report from a signed-in shopper who bought the product, a review is hidden until we check it." / "… After %d reports from signed-in shoppers who bought the product, a review is hidden until we check it."
+  - Neither repeats "We don't remove reviews because they are negative.": the `moderation` sentence always says it.
 
   `%d` is `reports_threshold`. Both are whole translatable sentences with a translators comment. Guest reports never count by default (above), so neither variant mentions them. A site that widens `report_counts_toward_hold` to guests must replace the key through the same filter.
 

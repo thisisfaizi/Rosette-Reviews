@@ -889,3 +889,11 @@ EVIDENCE: rr-14 44/44 (AC1–AC17 + admin view/column/row action/chip, + 14 node
 - The previous session ended mid-run (memory); resumed and finished.
 EVIDENCE: rr-15 30/30 (AC1–AC21; AC22 = core flows); all 19 suites green; debug.log empty; phpcs: no new issues
 (compared with HEAD on the touched files).
+
+## 2026-10-11 — RR-14 code review fixed → done (owner browser check pending)
+- Review `.agents/prd/reviews/code-RR-14.md`: 0 blockers, 4 majors, 12 minors; decisions in PRD RR-14 rev 6.
+  M1 per-request id seed + card-scoped JS; M2 status stays in the a11y tree, cleared then written; M3 top-level reviews
+  only; M4 every report on the edit screen. m1 500 vs 409; m2 one email by identity, held only when it happened; m3 held
+  count; m4 GROUP BY; m5 _n + no repeated sentence (§8 changed); m6 dismiss only unapproved→approved; m7 keep view;
+  m8 help text + 20/h email cap; m9 full-width footer + accent; m10; m11 copy; m12 → Pro RR-14P-4.
+EVIDENCE: rr-14 59/59 (15 new checks; node 18/18, the old display.js fails the new M1 case); phpcs clean.

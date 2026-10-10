@@ -425,25 +425,50 @@
 		}
 	}
 
-	// Report a review (RR-14). Each button controls its own form
-	// (aria-controls); everything is delegated, so cards replaced by the list
-	// AJAX keep working.
-	function reportButton( form ) {
-		return form && form.id ? document.querySelector( '[aria-controls="' + form.id + '"]' ) : null;
+	// Report a review (RR-14). The button, its form and its status line are
+	// found within the card's footer, never page-wide: a list refreshed by the
+	// list AJAX can repeat ids from elsewhere on the page. Everything is
+	// delegated, so replaced cards keep working.
+	function reportParts( el ) {
+		var scope = closest( el, '.ndvr-review-foot' ) || ( el ? el.parentNode : null );
+		return {
+			scope: scope,
+			btn: scope ? scope.querySelector( '.ndvr-report' ) : null,
+			form: scope ? scope.querySelector( '.ndvr-report-form' ) : null,
+			status: scope ? scope.querySelector( '.ndvr-report-status' ) : null
+		};
+	}
+
+	// The status line stays in the accessibility tree; clearing it first and
+	// writing on the next tick makes a repeated message announce again.
+	function announce( status, text ) {
+		if ( ! status ) {
+			return;
+		}
+		status.textContent = '';
+		setTimeout( function () {
+			status.textContent = text || '';
+		}, 50 );
 	}
 
 	function toggleReport( btn ) {
-		var form = document.getElementById( btn.getAttribute( 'aria-controls' ) || '' );
-		if ( ! form ) {
+		var parts = reportParts( btn );
+		if ( ! parts.form ) {
 			return;
 		}
-		if ( ! form.hidden ) {
-			closeReport( form );
+		if ( ! parts.form.hidden ) {
+			closeReport( parts.form );
 			return;
 		}
-		form.hidden = false;
+		parts.form.hidden = false;
 		btn.setAttribute( 'aria-expanded', 'true' );
-		var first = form.querySelector( 'select, textarea' );
+		if ( parts.scope && parts.scope.classList ) {
+			parts.scope.classList.add( 'is-reporting' );
+		}
+		if ( parts.status ) {
+			parts.status.textContent = '';
+		}
+		var first = parts.form.querySelector( 'select, textarea' );
 		if ( first ) {
 			first.focus();
 		}
@@ -453,11 +478,14 @@
 		if ( ! form ) {
 			return;
 		}
-		var btn     = reportButton( form );
+		var parts   = reportParts( form );
 		form.hidden = true;
-		if ( btn ) {
-			btn.setAttribute( 'aria-expanded', 'false' );
-			btn.focus();
+		if ( parts.scope && parts.scope.classList ) {
+			parts.scope.classList.remove( 'is-reporting' );
+		}
+		if ( parts.btn ) {
+			parts.btn.setAttribute( 'aria-expanded', 'false' );
+			parts.btn.focus();
 		}
 	}
 
@@ -465,10 +493,9 @@
 		if ( form.ndvrBusy ) {
 			return;
 		}
-		var i18n   = cfg.i18n || {};
-		var status = document.getElementById( form.id + '-status' );
-		var send   = form.querySelector( '.ndvr-report-send' );
-		var body   = new FormData( form );
+		var i18n = cfg.i18n || {};
+		var send = form.querySelector( '.ndvr-report-send' );
+		var body = new FormData( form );
 		body.append( 'action', cfg.reportAction );
 		body.append( 'nonce', cfg.reportNonce );
 		body.append( 'comment_id', form.getAttribute( 'data-comment-id' ) );
@@ -483,13 +510,16 @@
 			if ( send ) {
 				send.disabled = false;
 			}
+			// The list AJAX may have replaced this card meanwhile.
+			if ( false === form.isConnected ) {
+				return;
+			}
+			var status = reportParts( form ).status;
 			if ( close ) {
 				closeReport( form );
 			}
-			// After the form closes, so the message is read with focus back on the button.
-			if ( status ) {
-				status.textContent = text || '';
-			}
+			// After the form closes, so it is read with focus back on the button.
+			announce( status, text );
 		}
 
 		fetch( cfg.ajaxUrl, { method: 'POST', credentials: 'same-origin', body: body } )

@@ -87,21 +87,34 @@ function el( tag, { cls = [], attrs = {}, parent = null } = {} ) {
 }
 
 /**
- * A card footer: button, form (select, textarea, send, cancel) and status.
+ * Card footers (button, form with select/textarea/honeypot/send/cancel, and
+ * status). Every card gets the SAME ids, as after a list AJAX refresh (code
+ * review M1): page-wide lookups would hit the first card.
  */
-function page( file, replies ) {
-	const card   = el( 'div', { cls: [ 'ndvr-review' ] } );
-	const foot   = el( 'div', { cls: [ 'ndvr-review-foot' ], parent: card } );
-	const base   = 'ndvr-report-r1-42';
-	const btn    = el( 'button', { cls: [ 'ndvr-report' ], attrs: { 'aria-expanded': 'false', 'aria-controls': base }, parent: foot } );
-	const form   = el( 'form', { cls: [ 'ndvr-report-form' ], attrs: { id: base, 'data-comment-id': '42' }, parent: foot } );
-	form.hidden  = true;
-	const select = el( 'select', { attrs: { id: base + '-reason' }, parent: form } );
-	el( 'textarea', { attrs: { id: base + '-note' }, parent: form } );
-	const send   = el( 'button', { cls: [ 'ndvr-report-send' ], attrs: { type: 'submit' }, parent: form } );
-	const cancel = el( 'button', { cls: [ 'ndvr-report-cancel' ], attrs: { type: 'button' }, parent: form } );
-	const status = el( 'span', { cls: [ 'ndvr-report-status' ], attrs: { id: base + '-status', role: 'status' }, parent: foot } );
-	const byId   = { [ base ]: form, [ base + '-status' ]: status };
+function page( file, replies, cards = 1 ) {
+	const base  = 'ndvr-report-r1-42';
+	const byId  = {};
+	const list  = [];
+	for ( let i = 0; i < cards; i++ ) {
+		const card   = el( 'div', { cls: [ 'ndvr-review' ] } );
+		const foot   = el( 'div', { cls: [ 'ndvr-review-foot' ], parent: card } );
+		const btn    = el( 'button', { cls: [ 'ndvr-report' ], attrs: { 'aria-expanded': 'false', 'aria-controls': base }, parent: foot } );
+		const form   = el( 'form', { cls: [ 'ndvr-report-form' ], attrs: { id: base, 'data-comment-id': String( 42 + i ) }, parent: foot } );
+		form.hidden  = true;
+		const select = el( 'select', { attrs: { id: base + '-reason', name: 'reason' }, parent: form } );
+		select.value = 'off_topic';
+		const note   = el( 'textarea', { attrs: { id: base + '-note', name: 'note' }, parent: form } );
+		note.value   = 'Card ' + i + ' note';
+		const hp     = el( 'input', { attrs: { id: base + '-hp', name: 'ndvr_hp_url' }, parent: form } );
+		hp.value     = '';
+		const send   = el( 'button', { cls: [ 'ndvr-report-send' ], attrs: { type: 'submit' }, parent: form } );
+		const cancel = el( 'button', { cls: [ 'ndvr-report-cancel' ], attrs: { type: 'button' }, parent: form } );
+		const status = el( 'span', { cls: [ 'ndvr-report-status' ], attrs: { id: base + '-status', role: 'status' }, parent: foot } );
+		list.push( { foot, btn, form, select, note, send, cancel, status } );
+		// Page-wide id lookups resolve to the first card only.
+		byId[ base ]             = byId[ base ] || form;
+		byId[ base + '-status' ] = byId[ base + '-status' ] || status;
+	}
 
 	const listeners = {};
 	const ctx       = {
@@ -119,8 +132,21 @@ function page( file, replies ) {
 		},
 	};
 	ctx.window   = ctx;
+	// Serialises named controls, like the browser's FormData( form ).
 	ctx.FormData = class {
-		constructor( f ) { this.d = new Map(); this.form = f || null; }
+		constructor( f ) {
+			this.d    = new Map();
+			this.form = f || null;
+			const walk = ( n ) => n.children.forEach( ( c ) => {
+				if ( c.attrs && c.attrs.name ) {
+					this.d.set( c.attrs.name, c.value );
+				}
+				walk( c );
+			} );
+			if ( f ) {
+				walk( f );
+			}
+		}
 		append( k, v ) { this.d.set( k, v ); }
 		get( k ) { return this.d.has( k ) ? this.d.get( k ) : null; }
 	};
@@ -135,10 +161,7 @@ function page( file, replies ) {
 	ctx.document = {
 		addEventListener: ( t, fn ) => ( listeners[ t ] = listeners[ t ] || [] ).push( fn ),
 		getElementById: ( id ) => byId[ id ] || null,
-		querySelector: ( sel ) => {
-			const m = /^\[aria-controls="([^"]+)"\]$/.exec( sel );
-			return m && m[ 1 ] === base ? btn : null;
-		},
+		querySelector: ( sel ) => ( /^\[aria-controls="/.test( sel ) ? list[ 0 ].btn : null ),
 		querySelectorAll: () => [],
 		createElement: ( t ) => el( t ),
 		body: el( 'body' ),
@@ -150,7 +173,7 @@ function page( file, replies ) {
 		( listeners[ type ] || [] ).forEach( ( fn ) => fn( ev ) );
 		return ev;
 	};
-	return { ctx, btn, form, select, send, cancel, status, fire };
+	return Object.assign( { ctx, fire, cards: list }, list[ 0 ] );
 }
 
 const flush = async () => {
@@ -184,8 +207,19 @@ for ( const file of [ 'display.js', 'display.min.js' ] ) {
 		const busy = p.send.disabled;
 		await flush();
 		const f = p.ctx.fetches[ 0 ] || { body: new p.ctx.FormData() };
-		ok( ev.defaultPrevented && 1 === p.ctx.fetches.length && busy && 'ndvr_report_review' === f.body.get( 'action' ) && 'rn' === f.body.get( 'nonce' ) && '42' === f.body.get( 'comment_id' ) && f.body.form === p.form, `${ file }: submit posts once (busy guard) with action, nonce, comment id and the form fields` );
+		ok( ev.defaultPrevented && 1 === p.ctx.fetches.length && busy && 'ndvr_report_review' === f.body.get( 'action' ) && 'rn' === f.body.get( 'nonce' ) && '42' === f.body.get( 'comment_id' ) && 'off_topic' === f.body.get( 'reason' ) && 'Card 0 note' === f.body.get( 'note' ) && '' === f.body.get( 'ndvr_hp_url' ), `${ file }: submit posts once (busy guard) with action, nonce, comment id, reason, note and the honeypot` );
 		ok( 'Sent!' === p.status.textContent && p.form.hidden && 1 === p.form.resets && false === p.send.disabled && p.btn.focused >= 1, `${ file }: success → "${ p.status.textContent }", the form resets and closes, focus returns to the button` );
+	}
+	{
+		const p  = page( file, [ { code: 200, body: { success: true } } ], 2 );
+		const c2 = p.cards[ 1 ];
+		p.fire( 'click', c2.btn );
+		const own = ! c2.form.hidden && p.cards[ 0 ].form.hidden && 'true' === c2.btn.getAttribute( 'aria-expanded' ) && 'false' === p.cards[ 0 ].btn.getAttribute( 'aria-expanded' ) && 1 === c2.select.focused;
+		p.fire( 'submit', c2.form );
+		await flush();
+		const f = p.ctx.fetches[ 0 ] || { body: new p.ctx.FormData() };
+		ok( own && '43' === f.body.get( 'comment_id' ) && 'Card 1 note' === f.body.get( 'note' ) && 'Sent!' === c2.status.textContent && '' === p.cards[ 0 ].status.textContent && c2.form.hidden && 1 === c2.btn.focused && 0 === p.cards[ 0 ].btn.focused, `${ file } M1: with two cards sharing ids, the second card's button opens, sends and announces in its own card` );
+		ok( ! c2.foot.classes.has( 'is-reporting' ), `${ file } m9: the footer drops is-reporting when the form closes` );
 	}
 	{
 		const p = page( file, [ { code: 409, body: { success: false, data: { message: 'dup' } } } ] );
