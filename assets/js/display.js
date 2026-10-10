@@ -30,11 +30,17 @@
 				orderby: wrap.getAttribute( 'data-orderby' ) || 'recent',
 				tag: '',
 				answers: {},
+				// RR-16: starts from the box (a no-JS search may have filled it).
+				q: searchInput( wrap ) ? searchInput( wrap ).value.trim() : '',
 				page: 1,
 				perPage: parseInt( wrap.getAttribute( 'data-per-page' ), 10 ) || 0
 			};
 		}
 		return wrap.ndvrState;
+	}
+
+	function searchInput( wrap ) {
+		return wrap.querySelector( '.ndvr-search input[type="search"]' );
 	}
 
 	function listOf( wrap ) {
@@ -59,6 +65,7 @@
 		body.append( 'with_media', state.with_media ? '1' : '' );
 		body.append( 'orderby', state.orderby );
 		body.append( 'tag', state.tag );
+		body.append( 'q', state.q || '' );
 		body.append( 'page', state.page );
 		body.append( 'per_page', state.perPage );
 		Object.keys( state.answers || {} ).forEach( function ( field ) {
@@ -78,6 +85,9 @@
 				listWrap.classList.remove( 'is-loading' );
 				if ( res && res.success && res.data && typeof res.data.html === 'string' ) {
 					listWrap.innerHTML = res.data.html;
+					searchStatus( wrap, typeof res.data.status === 'string' ? res.data.status : '' );
+				} else if ( res && res.data && res.data.message && state.q ) {
+					searchStatus( wrap, res.data.message );
 					if ( scroll ) {
 						listWrap.scrollIntoView( { behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' } );
 					}
@@ -88,6 +98,23 @@
 				listWrap.classList.remove( 'is-loading' );
 				listWrap.setAttribute( 'aria-busy', 'false' );
 			} );
+	}
+
+	// The search line (role=status): cleared first, then written on the next
+	// tick, so the same result announces again.
+	function searchStatus( wrap, text ) {
+		var status = wrap.querySelector( '.ndvr-search-status' );
+		var clear  = wrap.querySelector( '.ndvr-search-clear' );
+		if ( clear ) {
+			clear.hidden = ! getState( wrap ).q;
+		}
+		if ( ! status ) {
+			return;
+		}
+		status.textContent = '';
+		setTimeout( function () {
+			status.textContent = text || '';
+		}, 50 );
 	}
 
 	function reducedMotion() {
@@ -544,6 +571,39 @@
 				done( i18n.reportError, false );
 			} );
 	}
+
+	// Review search (RR-16): the GET form works without JS; with JS it
+	// filters the list in place, keeping the other filters and the sort.
+	document.addEventListener( 'submit', function ( e ) {
+		var search = closest( e.target, '.ndvr-search' );
+		var wrap   = search ? closest( search, INSTANCE ) : null;
+		if ( ! wrap ) {
+			return;
+		}
+		e.preventDefault();
+		var input = searchInput( wrap );
+		var state = getState( wrap );
+		state.q    = input ? input.value.trim() : '';
+		state.page = 1;
+		fetchList( wrap, false );
+	} );
+
+	document.addEventListener( 'click', function ( e ) {
+		var clear = closest( e.target, '.ndvr-search-clear' );
+		var wrap  = clear ? closest( clear, INSTANCE ) : null;
+		if ( ! wrap ) {
+			return;
+		}
+		var input = searchInput( wrap );
+		if ( input ) {
+			input.value = '';
+			input.focus();
+		}
+		var state = getState( wrap );
+		state.q    = '';
+		state.page = 1;
+		fetchList( wrap, false );
+	} );
 
 	document.addEventListener( 'submit', function ( e ) {
 		var form = closest( e.target, '.ndvr-report-form' );

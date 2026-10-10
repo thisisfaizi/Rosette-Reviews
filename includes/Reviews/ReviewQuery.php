@@ -47,6 +47,7 @@ class ReviewQuery {
 				'verified'   => false,
 				'with_media' => false,
 				'answers'    => array(),
+				'search'     => '',
 				'orderby'    => 'recent',
 				'page'       => 1,
 				'per_page'   => 10,
@@ -111,6 +112,22 @@ class ReviewQuery {
 			}
 			$query_args['comment__in'] = $ids;
 		}
+
+		// Text search (RR-16): one product only, resolved to an id list like the
+		// tag and photo filters, so cached results never mix (never the
+		// WP_Comment_Query `search` arg, which also matches emails and IPs).
+		$search = $product_id ? self::normalize_search( $args['search'] ) : '';
+		if ( '' !== $search ) {
+			$ids = $this->search_ids( $product_id, $search );
+			if ( isset( $query_args['comment__in'] ) ) {
+				$ids = array_values( array_intersect( $query_args['comment__in'], $ids ) );
+			}
+			if ( empty( $ids ) ) {
+				return $this->empty_result( $page ) + array( 'search' => $search );
+			}
+			$query_args['comment__in'] = $ids;
+		}
+		$args['search'] = $search;
 
 		// Filters.
 		$star = (int) $args['star'];
@@ -234,7 +251,9 @@ class ReviewQuery {
 
 		$items = array();
 		foreach ( (array) $comments as $comment ) {
-			$items[] = $this->to_view( $comment, $criteria_map, $media_map );
+			$view           = $this->to_view( $comment, $criteria_map, $media_map );
+			$view['search'] = $search; // RR-16: the highlighter reads it.
+			$items[]        = $view;
 		}
 
 		/**
@@ -246,11 +265,78 @@ class ReviewQuery {
 		$items = apply_filters( 'ndv-reviews/review_items', $items, $args );
 
 		return array(
-			'items' => $items,
-			'total' => $total,
-			'pages' => (int) ceil( $total / $per_page ),
-			'page'  => $page,
+			'items'  => $items,
+			'total'  => $total,
+			'pages'  => (int) ceil( $total / $per_page ),
+			'page'   => $page,
+			'search' => $search,
 		);
+	}
+
+	/**
+	 * A search query as it is used (RR-16): sanitised, trimmed, 2 to 80
+	 * characters, else ''.
+	 *
+	 * @param mixed $raw Raw query (already unslashed).
+	 * @return string
+	 */
+	public static function normalize_search( $raw ) {
+		$q   = is_scalar( $raw ) ? trim( sanitize_text_field( (string) $raw ) ) : '';
+		$len = mb_strlen( $q, 'UTF-8' );
+
+		return $len >= 2 && $len <= 80 ? $q : '';
+	}
+
+	/**
+	 * Ids of a product's published reviews whose text or title contains the
+	 * query (case-insensitive; NDVR_API 10). Only the review text and the
+	 * title are searched, never the author, email, URL or IP.
+	 *
+	 * @param int    $product_id Product (its pool is searched too).
+	 * @param string $q          Normalised query.
+	 * @return int[] Newest first, at most `ndv-reviews/search_max_ids` (1000).
+	 */
+	public function search_ids( $product_id, $q ) {
+		global $wpdb;
+
+		$product_id = absint( $product_id );
+		$q          = self::normalize_search( $q );
+		if ( ! $product_id || '' === $q ) {
+			return array();
+		}
+		$posts = array_values( array_unique( array( $product_id, Pool::resolve_id( $product_id ) ) ) );
+
+		/**
+		 * Filter the most reviews one search considers.
+		 *
+		 * @param int $max Default 1000.
+		 */
+		$max = max( 1, (int) apply_filters( 'ndv-reviews/search_max_ids', 1000 ) );
+		// Stored text is kses'd ("&" is "&amp;"), so both spellings are tried; the
+		// match is confirmed on the visible text below.
+		$raw = '%' . $wpdb->esc_like( $q ) . '%';
+		$enc = '%' . $wpdb->esc_like( esc_html( $q ) ) . '%';
+		$in  = implode( ',', array_fill( 0, count( $posts ), '%d' ) );
+		$sql = "SELECT c.comment_ID, c.comment_content, t.meta_value AS title
+			FROM {$wpdb->comments} c
+			LEFT JOIN {$wpdb->commentmeta} t ON t.comment_id = c.comment_ID AND t.meta_key = '_ndvr_title'
+			WHERE c.comment_post_ID IN ({$in}) AND c.comment_approved = '1' AND c.comment_parent = 0 AND c.comment_type IN ('review','comment')
+				AND ( c.comment_content LIKE %s OR c.comment_content LIKE %s OR t.meta_value LIKE %s )
+			ORDER BY c.comment_date_gmt DESC
+			LIMIT %d";
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- placeholders built above.
+		$rows = (array) $wpdb->get_results( $wpdb->prepare( $sql, array_merge( $posts, array( $raw, $enc, $raw, $max ) ) ) );
+
+		$ids = array();
+		foreach ( $rows as $row ) {
+			// Visible text only: a match inside a tag name or attribute doesn't count.
+			$text = html_entity_decode( wp_strip_all_tags( (string) $row->comment_content ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) . "\n" . html_entity_decode( (string) $row->title, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+			if ( false !== mb_stripos( $text, $q, 0, 'UTF-8' ) ) {
+				$ids[] = (int) $row->comment_ID;
+			}
+		}
+
+		return $ids;
 	}
 
 	/**

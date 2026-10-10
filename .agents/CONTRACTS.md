@@ -332,3 +332,13 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   Meta `_ndvr_report_held_n` (count when held). Transient `ndvr_report_mails` + filter `ndv-reviews/report_emails_per_hour`
   (20). Reports are dismissed only on unapproved → approved. `edit_screen_reports()` on `moderation_edit_fields`
   (`#ndvr-reports`). AJAX: duplicate 409, database error 500.
+
+## Review search (RR-16, NDVR_API 10, no schema)
+- `ReviewQuery::paginate( [ 'search' => string ] )` (product only; result + every item gain `search`, the query used or ''),
+  `ReviewQuery::search_ids( $product_id, $q )` (product + pool, approved top-level reviews, content + `_ndvr_title` only, newest
+  first, filter `ndv-reviews/search_max_ids` 1000), `ReviewQuery::normalize_search( $raw )` (sanitised, trimmed, 2–80 chars).
+- `Display\ReviewSearch`: box on `filter_bar_end` (`form.ndvr-search[role=search]`, input `ndvr_q`, `.ndvr-search-clear`,
+  `p.ndvr-search-status[role=status]`), `available( $product_id )` (filter `ndv-reviews/search_min_reviews` 10, pool count),
+  `status_text()`, `highlight()` on `review_body_html` / `review_title_html` (`<mark class="ndvr-mark">`).
+- AJAX `ndvr_list_reviews` param `q`: rate bucket `list` (filter `ndv-reviews/search_rate_limit_per_hour` 60; 429), product
+  required (400), ignored below the minimum; payload adds `total`, `q`, `status`. GET `ndvr_q` on the product page (no JS).

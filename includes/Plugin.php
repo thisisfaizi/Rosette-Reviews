@@ -567,6 +567,7 @@ final class Plugin {
 			$this->container->get( 'admin_design_page' ),
 			$this->container->get( 'admin_settings_page' ),
 			$this->container->get( 'renderer' ),
+			new \NdvReviews\Display\ReviewSearch(),
 			$this->container->get( 'votes' ),
 			$this->container->get( 'reports' ),
 			$this->container->get( 'review_edits' ),

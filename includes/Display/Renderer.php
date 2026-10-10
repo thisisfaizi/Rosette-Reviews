@@ -274,15 +274,19 @@ class Renderer implements Registerable {
 		do_action( 'ndv-reviews/after_summary', $product_id );
 
 		if ( ! empty( $summary['count'] ) ) {
-			$this->render_topic_pills( $product_id );
-			$this->render_filter_bar( $product_id );
-
+			// No-JS search (RR-16): ?ndvr_q= on the product page.
+			$raw    = ReviewSearch::available( $product_id ) ? ReviewSearch::get_query() : '';
 			$result = $this->query->paginate(
 				array(
 					'product_id' => $product_id,
 					'per_page'   => $per_page,
+					'search'     => $raw,
 				)
 			);
+			ReviewSearch::set_current( $raw, (string) ( $result['search'] ?? '' ), (int) $result['total'] );
+
+			$this->render_topic_pills( $product_id );
+			$this->render_filter_bar( $product_id );
 
 			printf( '<div%s class="ndvr-review-list-wrap" aria-live="polite" aria-busy="false">', $use_ids ? ' id="ndvr-review-list"' : '' );
 			$list_html = View::render(
@@ -445,7 +449,27 @@ class Renderer implements Registerable {
 				}
 			}
 		}
+		// Text search (RR-16).
+		$raw = isset( $_POST['q'] ) && is_scalar( $_POST['q'] ) ? trim( sanitize_text_field( wp_unslash( (string) $_POST['q'] ) ) ) : '';
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
+		if ( '' !== $raw ) {
+			/**
+			 * Filter the searches one visitor may run per hour.
+			 *
+			 * @param int $max Default 60.
+			 */
+			$limit = \NdvReviews\Plugin::instance()->container()->get( 'antispam' )->rate_limit( 'list', (int) apply_filters( 'ndv-reviews/search_rate_limit_per_hour', 60 ) );
+			if ( is_wp_error( $limit ) ) {
+				wp_send_json_error( array( 'message' => __( 'Too many searches. Try again in a few minutes.', 'rosette-reviews' ) ), 429 );
+			}
+			// Search is per product, never store-wide.
+			if ( ! $product_id ) {
+				wp_send_json_error( array( 'message' => __( 'Search needs a product.', 'rosette-reviews' ) ), 400 );
+			}
+			if ( ! ReviewSearch::available( $product_id ) ) {
+				$raw = '';
+			}
+		}
 
 		$result = $this->query->paginate(
 			array(
@@ -456,20 +480,30 @@ class Renderer implements Registerable {
 				'orderby'    => $orderby,
 				'tag'        => $tag,
 				'answers'    => $answers,
+				'search'     => $raw,
 				'page'       => $page,
 				'per_page'   => $per_page,
 			)
 		);
+		$q      = (string) ( $result['search'] ?? '' );
 
 		$html = View::render(
 			'review-list.php',
 			array(
 				'result'     => $result,
 				'vote_nonce' => wp_create_nonce( Votes::NONCE_ACTION ),
-				'filtered'   => $star || $verified || $with_media || '' !== $tag || ! empty( $answers ),
+				'filtered'   => $star || $verified || $with_media || '' !== $tag || ! empty( $answers ) || '' !== $q,
 			)
 		);
 
-		wp_send_json_success( array( 'html' => $html ) );
+		wp_send_json_success(
+			array(
+				'html'   => $html,
+				// RR-16 (NDVR_API 10): the matching total, the query used, the line to announce.
+				'total'  => (int) $result['total'],
+				'q'      => $q,
+				'status' => ReviewSearch::status_text( $raw, $q, (int) $result['total'] ),
+			)
+		);
 	}
 }

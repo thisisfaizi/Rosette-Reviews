@@ -897,3 +897,10 @@ EVIDENCE: rr-15 30/30 (AC1–AC21; AC22 = core flows); all 19 suites green; debu
   count; m4 GROUP BY; m5 _n + no repeated sentence (§8 changed); m6 dismiss only unapproved→approved; m7 keep view;
   m8 help text + 20/h email cap; m9 full-width footer + accent; m10; m11 copy; m12 → Pro RR-14P-4.
 EVIDENCE: rr-14 59/59 (15 new checks; node 18/18, the old display.js fails the new M1 case); phpcs clean.
+
+## 2026-10-11 — RR-16 review search: built → in review
+- PRD reconciled (rev 4): API 10; F5 filters and filter_bar_end already shipped; search covers product + pool like
+  paginate(); status text built on the server (_n); tab runs the query before the filter bar.
+EVIDENCE: rr-16 17/17 (AC1–AC15 incl. plain permalinks, pool, theme override, cache-key and privacy checks); AC13
+6.5 ms average for search_ids() over 5,000 seeded reviews (SQLite QA site; budget 50 ms); all 20 suites green;
+debug.log empty; phpcs: no new issues.

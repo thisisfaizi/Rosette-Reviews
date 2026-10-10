@@ -1,6 +1,15 @@
 # RR-16: Shopper review search
 
-Status: prd-ok (rev 3) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Depends on RR-00 F5 (`filter_bar_end`, `review_body_html`, `review_title_html`) and F7 (`rate_limit`) · Raises `NDVR_API` to **9** (RR-00 F3b; planned build order, final at merge)
+Status: building (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Depends on RR-00 F5 and F7 · Raises `NDVR_API` to **10** (9 went to RR-15)
+
+Rev 4 (reconciled with the code after RR-11 to RR-15, before building):
+- **Already shipped:** F5's `review_title_html` and `review_body_html` filters are in `review-item.php`, and `render_filter_bar( $product_id )` fires `filter_bar_end` with the product id. §5's template and Renderer edits are therefore done.
+- **API 10:** every "`NDVR_API >= 9`" below means **>= 10** (Pro task RR-16P-1).
+- **Both post ids:** `paginate()` reads reviews stored on the product and on its pool (`post__in` both, RR-00b E4). `search_ids()` searches the same two ids, so a search can't find fewer reviews than the list shows.
+- **One class:** `Display\ReviewSearch` holds the box (on `filter_bar_end`), the availability rule, the status text, and the highlighter on the two F5 filters. `ReviewQuery` holds `search_ids()`, `normalize_search()` and the `search` arg. `Renderer` reads `q` and `ndvr_q`.
+- **Status text from the server:** the AJAX payload gains `status`, the line to announce (built with `_n()`, so every language gets its plural forms). The tab prints the same text without JS. The JS only writes `res.data.status`; no `searchResults` strings in `ndvrDisplay`.
+- **Tab order:** the tab now runs `paginate()` before printing the filter bar, so the no-JS status and the prefilled box can show the result.
+- **AC6:** a 1-character query is below the minimum, so AC6 tests `&` inside a longer query ("& c"). `sanitize_text_field()` strips `<script>`, so that query becomes empty and the full list shows.
 
 Review findings applied: round 2 RR-16 items 1 (pool-aware), 2 (plain permalinks) and 3 (AC13 budget).
 
