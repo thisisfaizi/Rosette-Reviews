@@ -180,7 +180,7 @@ class TestimonialForm implements Registerable {
 		$captcha = AntiSpam::active();
 		if ( 'none' !== $captcha ) :
 			?>
-			data-captcha-provider="<?php echo esc_attr( $captcha ); ?>" data-captcha-key="<?php echo esc_attr( AntiSpam::site_key( $captcha ) ); ?>"<?php endif; ?>
+			data-captcha-provider="<?php echo esc_attr( $captcha ); ?>" data-captcha-key="<?php echo esc_attr( AntiSpam::site_key( $captcha ) ); ?>" data-captcha-message="<?php echo esc_attr( AntiSpam::wait_message() ); ?>"<?php endif; ?>
 			<?php
 			if ( 'recaptcha' === $captcha ) :
 				?>

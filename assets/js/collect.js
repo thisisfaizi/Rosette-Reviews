@@ -4,11 +4,12 @@
  *
  * Captcha (RR-13): when the form container carries data-captcha-provider
  * (recaptcha|turnstile|hcaptcha) and data-captcha-key, the provider script was
- * enqueued before this one. Turnstile and hCaptcha widgets render explicitly
- * into each form's .ndvr-captcha; the token is sent as ndvr_captcha_token and
- * the widget resets after every response (tokens are single-use). The
- * tokenized landing page never sets a provider: the review link authenticates
- * the customer.
+ * enqueued before this one. Turnstile and hCaptcha widgets render into each
+ * form's .ndvr-captcha from the provider's onload callback (ndvrCaptchaReady,
+ * AntiSpam::READY_JS). The request is sent only with a token, as
+ * ndvr_captcha_token, and the widget resets after every response (tokens are
+ * single-use). The tokenized landing page never sets a provider: the review
+ * link authenticates the customer.
  */
 ( function () {
 	'use strict';
@@ -30,70 +31,148 @@
 		return root.getAttribute( 'data-captcha-key' ) || root.getAttribute( 'data-recaptcha-key' ) || '';
 	}
 
-	// Render a form's Turnstile / hCaptcha widget once (on load if the
-	// provider script isn't ready yet).
+	var WAIT = 15000;
+
+	// A testimonial page cached before RR-13 has only data-recaptcha-key and
+	// no reCAPTCHA script tag (the old collect.js added it). Load it once, so
+	// such a page keeps working until the cache refreshes.
+	var legacyLoading = null;
+	function legacyRecaptcha( root ) {
+		if ( window.grecaptcha || root.getAttribute( 'data-captcha-provider' ) || ! root.getAttribute( 'data-recaptcha-key' ) ) {
+			return Promise.resolve();
+		}
+		if ( ! legacyLoading ) {
+			legacyLoading = new Promise( function ( resolve ) {
+			var s     = document.createElement( 'script' );
+			s.src     = 'https://www.google.com/recaptcha/api.js?render=' + encodeURIComponent( root.getAttribute( 'data-recaptcha-key' ) );
+			s.async   = true;
+			s.onload  = resolve;
+			s.onerror = resolve;
+			document.head.appendChild( s );
+			} );
+		}
+		return legacyLoading;
+	}
+
+	function setFormToken( form, token ) {
+		form.ndvrToken = token || '';
+		if ( form.ndvrToken && form.ndvrWaiters ) {
+			var list         = form.ndvrWaiters;
+			form.ndvrWaiters = [];
+			list.forEach( function ( fn ) { fn( form.ndvrToken ); } );
+		}
+	}
+
+	function rendered( form ) {
+		return null !== form.ndvrWidget && undefined !== form.ndvrWidget;
+	}
+
+	// Render a form's Turnstile / hCaptcha widget once.
 	function renderCaptcha( root, form ) {
 		var el       = form.querySelector( '.ndvr-captcha' );
 		var provider = captchaProvider( root );
-		if ( ! el || form.ndvrWidget !== undefined ) {
+		var id       = null;
+		if ( ! el || rendered( form ) ) {
 			return;
 		}
+		var options = {
+			sitekey: el.getAttribute( 'data-sitekey' ) || captchaKey( root ),
+			callback: function ( token ) { setFormToken( form, token ); },
+			'expired-callback': function () { setFormToken( form, '' ); },
+			'error-callback': function () { setFormToken( form, '' ); }
+		};
 		try {
 			if ( 'turnstile' === provider && window.turnstile ) {
-				form.ndvrWidget = window.turnstile.render( el, {
-					sitekey: el.getAttribute( 'data-sitekey' ) || captchaKey( root ),
-					'response-field': false,
-					callback: function ( token ) { form.ndvrToken = token; },
-					'expired-callback': function () { form.ndvrToken = ''; },
-					'error-callback': function () { form.ndvrToken = ''; }
-				} );
+			options[ 'response-field' ] = false;
+			id = window.turnstile.render( el, options );
 			} else if ( 'hcaptcha' === provider && window.hcaptcha ) {
-				form.ndvrWidget = window.hcaptcha.render( el, {
-					sitekey: el.getAttribute( 'data-sitekey' ) || captchaKey( root ),
-					size: 'invisible'
-				} );
+			options.size = 'invisible';
+			id = window.hcaptcha.render( el, options );
 			}
-		} catch ( e ) {}
+		} catch ( e ) {
+			id = null;
+		}
+		// A failed render can return undefined: never treat that as a widget.
+		form.ndvrWidget = ( 'string' === typeof id || 'number' === typeof id ) ? id : null;
 	}
 
 	function resetCaptcha( root, form ) {
 		var provider = captchaProvider( root );
-		form.ndvrToken = '';
-		if ( form.ndvrWidget === undefined ) {
+		setFormToken( form, '' );
+		if ( ! rendered( form ) ) {
 			return;
 		}
 		try {
 			if ( 'turnstile' === provider && window.turnstile ) {
-				window.turnstile.reset( form.ndvrWidget );
+			window.turnstile.reset( form.ndvrWidget );
 			} else if ( 'hcaptcha' === provider && window.hcaptcha ) {
-				window.hcaptcha.reset( form.ndvrWidget );
+			window.hcaptcha.reset( form.ndvrWidget );
 			}
 		} catch ( e ) {}
 	}
 
-	// A fresh token ('' when there is no captcha, or it failed: the server
-	// then reports the captcha message).
+	// Resolve after `ms` with '' unless `start` resolves first.
+	function withTimeout( start, ms ) {
+		return new Promise( function ( resolve ) {
+			var settled = false;
+			function done( value ) {
+			if ( ! settled ) {
+				settled = true;
+				resolve( value || '' );
+			}
+			}
+			setTimeout( function () { done( '' ); }, ms );
+			try {
+			start( done );
+			} catch ( e ) {
+			done( '' );
+			}
+		} );
+	}
+
+	// A token for this submission ('' when there is no captcha, or the
+	// verification produced none: the request is then not sent).
 	function captchaToken( root, form ) {
 		var provider = captchaProvider( root );
 		var key      = captchaKey( root );
-		try {
-			if ( 'recaptcha' === provider && window.grecaptcha && key ) {
-				return new Promise( function ( resolve ) {
-					window.grecaptcha.ready( function () {
-						window.grecaptcha.execute( key, { action: 'review' } ).then( resolve, function () { resolve( '' ); } );
-					} );
+		if ( 'recaptcha' === provider ) {
+			return legacyRecaptcha( root ).then( function () {
+			return withTimeout( function ( done ) {
+				if ( ! window.grecaptcha || ! key ) {
+					done( '' );
+					return;
+				}
+				window.grecaptcha.ready( function () {
+					window.grecaptcha.execute( key, { action: 'review' } ).then( done, function () { done( '' ); } );
 				} );
+			}, WAIT );
+			} );
+		}
+		renderCaptcha( root, form );
+		if ( 'hcaptcha' === provider && window.hcaptcha && rendered( form ) ) {
+			// No timeout: the visitor may be solving a challenge.
+			return window.hcaptcha.execute( form.ndvrWidget, { async: true } ).then( function ( res ) {
+			return ( res && res.response ) || '';
+			}, function () { return ''; } );
+		}
+		if ( 'turnstile' === provider && window.turnstile && rendered( form ) ) {
+			if ( form.ndvrToken ) {
+			return Promise.resolve( form.ndvrToken );
 			}
-			renderCaptcha( root, form );
-			if ( 'hcaptcha' === provider && window.hcaptcha && form.ndvrWidget !== undefined ) {
-				return window.hcaptcha.execute( form.ndvrWidget, { async: true } ).then( function ( res ) {
-					return ( res && res.response ) || '';
-				}, function () { return ''; } );
+			// The challenge may still be running: wait for its callback.
+			return withTimeout( function ( done ) {
+			var current = '';
+			try {
+				current = window.turnstile.getResponse( form.ndvrWidget ) || '';
+			} catch ( e ) {}
+			if ( current ) {
+				done( current );
+				return;
 			}
-			if ( 'turnstile' === provider && window.turnstile && form.ndvrWidget !== undefined ) {
-				return Promise.resolve( form.ndvrToken || window.turnstile.getResponse( form.ndvrWidget ) || '' );
-			}
-		} catch ( e ) {}
+			form.ndvrWaiters = form.ndvrWaiters || [];
+			form.ndvrWaiters.push( done );
+			}, WAIT );
+		}
 		return Promise.resolve( '' );
 	}
 
@@ -103,6 +182,11 @@
 		var msg = form.querySelector( '.ndvr-form-message' );
 		var btn = form.querySelector( '.ndvr-collect-submit' );
 
+		// One request at a time: a second click would reuse a single-use token.
+		if ( form.ndvrBusy ) {
+			return Promise.resolve( false );
+		}
+		form.ndvrBusy = true;
 		if ( btn ) {
 			btn.disabled = true;
 		}
@@ -112,20 +196,28 @@
 		}
 
 		function fail( text ) {
+			form.ndvrBusy = false;
 			if ( msg ) {
-				msg.textContent = text;
-				msg.className = 'ndvr-form-message is-error';
+			msg.textContent = text;
+			msg.className = 'ndvr-form-message is-error';
 			}
 			if ( btn ) {
-				btn.disabled = false;
+			btn.disabled = false;
 			}
 		}
 
 		return captchaToken( root, form ).then( function ( token ) {
+			if ( captchaProvider( root ) && ! token ) {
+			// Nothing is sent, so no attempt is used up and the widget keeps
+			// its challenge.
+			fail( root.getAttribute( 'data-captcha-message' ) || 'Please complete the verification, then submit again.' );
+			return false;
+			}
+
 			var body = new FormData( form );
 			body.append( 'action', action );
 			if ( token ) {
-				body.append( 'ndvr_captcha_token', token );
+			body.append( 'ndvr_captcha_token', token );
 			}
 
 			// `action` also travels in the URL: when the upload is larger than
@@ -134,33 +226,34 @@
 			var url = ajaxUrl + ( ajaxUrl.indexOf( '?' ) < 0 ? '?' : '&' ) + 'action=' + encodeURIComponent( action );
 
 			return fetch( url, { method: 'POST', credentials: 'same-origin', body: body } )
-				.then( function ( r ) { return r.json(); } )
-				.then( function ( res ) {
-					resetCaptcha( root, form );
-					if ( res && res.success ) {
-						if ( msg ) {
-							msg.textContent = ( res.data && res.data.message ) || 'Thank you.';
-							msg.className = 'ndvr-form-message is-success';
-						}
-						form.classList.add( 'is-done' );
-						var fields = form.querySelector( '.ndvr-fields' );
-						if ( fields ) {
-							// Keep the status message visible: move it out before hiding the fields.
-							if ( msg && fields.contains( msg ) ) {
-								fields.parentNode.insertBefore( msg, fields );
-							}
-							fields.style.display = 'none';
-						}
-						return true;
+			.then( function ( r ) { return r.json(); } )
+			.then( function ( res ) {
+				resetCaptcha( root, form );
+				if ( res && res.success ) {
+					form.ndvrBusy = false;
+					if ( msg ) {
+						msg.textContent = ( res.data && res.data.message ) || 'Thank you.';
+						msg.className = 'ndvr-form-message is-success';
 					}
-					fail( ( res && res.data && res.data.message ) || 'Something went wrong.' );
-					return false;
-				} )
-				.catch( function () {
-					resetCaptcha( root, form );
-					fail( 'Network error. Please try again.' );
-					return false;
-				} );
+					form.classList.add( 'is-done' );
+					var fields = form.querySelector( '.ndvr-fields' );
+					if ( fields ) {
+						// Keep the status message visible: move it out before hiding the fields.
+						if ( msg && fields.contains( msg ) ) {
+							fields.parentNode.insertBefore( msg, fields );
+						}
+						fields.style.display = 'none';
+					}
+					return true;
+				}
+				fail( ( res && res.data && res.data.message ) || 'Something went wrong.' );
+				return false;
+			} )
+			.catch( function () {
+				resetCaptcha( root, form );
+				fail( 'Network error. Please try again.' );
+				return false;
+			} );
 		} );
 	}
 
@@ -261,9 +354,16 @@
 	Array.prototype.forEach.call( roots, function ( root ) {
 		Array.prototype.forEach.call( root.querySelectorAll( '.ndvr-collect-form' ), function ( form ) {
 			lengthCounter( form.querySelector( 'textarea[data-ndvr-min-length]' ) );
-			renderCaptcha( root, form );
-			if ( form.querySelector( '.ndvr-captcha' ) && form.ndvrWidget === undefined ) {
-				window.addEventListener( 'load', function () { renderCaptcha( root, form ); } );
+			if ( form.querySelector( '.ndvr-captcha' ) ) {
+				var render = function () { renderCaptcha( root, form ); };
+				if ( window.ndvrCaptchaLoaded ) {
+					render();
+				} else {
+					( window.ndvrCaptchaQueue = window.ndvrCaptchaQueue || [] ).push( render );
+					// Without the callback (an optimiser that strips it), the API is
+					// initialised by the time the page has loaded.
+					window.addEventListener( 'load', function () { setTimeout( render, 0 ); } );
+				}
 			}
 			form.addEventListener( 'submit', function ( e ) {
 				e.preventDefault();

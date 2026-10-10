@@ -338,6 +338,25 @@ class ReviewForm implements Registerable {
 	}
 
 	/**
+	 * Whether this visitor sees the review form on the current product (the
+	 * rules of Renderer::render_form() and the login setting).
+	 *
+	 * @return bool
+	 */
+	private function form_renders() {
+		$product_id = (int) get_queried_object_id();
+		if ( ! $product_id || ! comments_open( $product_id ) ) {
+			return false;
+		}
+		if ( ! is_user_logged_in() && ! $this->settings->get( 'allow_guest_reviews', true ) ) {
+			return false;
+		}
+
+		return 'yes' !== get_option( 'woocommerce_review_rating_verification_required' )
+			|| ( is_user_logged_in() && function_exists( 'wc_customer_bought_product' ) && wc_customer_bought_product( '', get_current_user_id(), $product_id ) );
+	}
+
+	/**
 	 * Conditionally enqueue the form assets (only where the form renders).
 	 *
 	 * @return void
@@ -348,10 +367,13 @@ class ReviewForm implements Registerable {
 		}
 
 		wp_enqueue_style( 'ndvr-reviews', NDVR_URL . 'assets/css/reviews.css', array( 'ndvr-tokens' ), NDVR_VERSION );
-		// The captcha provider's script loads first (RR-13); none by default.
-		$captcha = AntiSpam::register_script();
+		// The captcha provider's script loads first (RR-13); none by default,
+		// and none where this visitor gets no form (the browser would contact
+		// the provider for nothing).
+		$form     = $this->form_renders();
+		$captcha  = $form ? AntiSpam::register_script() : '';
+		$provider = $captcha ? AntiSpam::active() : 'none';
 		wp_enqueue_script( 'ndvr-reviews', NDVR_URL . 'assets/js/reviews.js', $captcha ? array( $captcha ) : array(), NDVR_VERSION, true );
-		$provider = AntiSpam::active();
 
 		wp_localize_script(
 			'ndvr-reviews',
@@ -370,6 +392,8 @@ class ReviewForm implements Registerable {
 					'submitting' => __( 'Submitting…', 'rosette-reviews' ),
 					'thanks'     => __( 'Thank you. Your review has been submitted and is awaiting moderation.', 'rosette-reviews' ),
 					'error'      => __( 'Something went wrong. Please try again.', 'rosette-reviews' ),
+					'rating'     => __( 'Please give a star rating before submitting your review.', 'rosette-reviews' ),
+					'captcha'    => AntiSpam::wait_message(),
 				),
 			)
 		);

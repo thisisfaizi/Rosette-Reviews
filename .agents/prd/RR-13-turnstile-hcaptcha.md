@@ -1,8 +1,26 @@
 # RR-13: Cloudflare Turnstile and hCaptcha
 
-Status: built, in review (rev 3) · Plan: F · Inherits PRD-00 + RR-00 · No schema change; the settings migration is RR-00's own `Installer::steps()` entry (its version number is provisional per PRD-00 §4) · No Pro-facing API, so no `NDVR_API` change
+Status: built, review fixed (rev 4); browser check with test keys still to do (§13.5) · Plan: F · Inherits PRD-00 + RR-00 · No schema change; the settings migration is RR-00's own `Installer::steps()` entry (its version number is provisional per PRD-00 §4) · No Pro-facing API, so no `NDVR_API` change
 
 Review findings applied: round 2 RR-13 item 1 (provider scripts enqueued, explicit render on load).
+
+Rev 4 (code review `reviews/code-RR-13.md`, 0 blockers, 4 majors, 11 minors):
+- **M1, token race:** neither script sends a request without a token. Turnstile waits for the widget's `callback` (up to 15 s). hCaptcha waits for `execute()`, with no timeout because the visitor may be solving a challenge. reCAPTCHA waits for `ready()` and `execute()` (up to 15 s, m9). With no token, the form says "Please complete the verification, then submit again." (`AntiSpam::wait_message()`, localized as `i18n.captcha` and the testimonial root's `data-captcha-message`). Nothing is sent, so no rate-limit slot is used and the widget keeps its challenge. The widget resets only after a response.
+- **M2, cached pages:** reviews.js falls back to `cfg.siteKey` (reCAPTCHA) and the old `ndvr_recaptcha_token` input when `cfg.captcha` is missing. **AC2 is amended:** collect.js still never adds a script for current markup. Only `legacyRecaptcha()` loads Google's script once, and only for a root that has `data-recaptcha-key` without `data-captcha-provider`, which is markup cached before RR-13 (exactly what the old collect.js did). The alternative, purging third-party page caches on upgrade, was rejected as too invasive.
+- **M3, render timing:** the Turnstile and hCaptcha URLs carry `onload=ndvrCaptchaReady`. An inline script printed before the provider script (`AntiSpam::READY_JS`, `wp_add_inline_script( …, 'before' )`) defines it and runs a queue (`window.ndvrCaptchaQueue`). Widgets render from that queue once the API has read its options, so `recaptchacompat=off` applies. A `load` fallback covers optimisers that strip the callback.
+- **M4:** logged as follow-up RR-13-f1 (the native `wp-comments-post.php` path skips `AntiSpam`; it predates RR-13).
+- **m1:** a busy flag and disabled submit buttons in both scripts. The dead CSS selector now targets `#ndvr-review-form.is-submitting`.
+- **m2:** the star-rating check runs before any captcha work. A rejected `execute()` shows the message locally, without a request. hCaptcha has an `error-callback`.
+- **m3:** a token over 4096 characters (`TOKEN_MAX`) is refused without a request. A filtered verify URL that fails `wp_http_validate_url()` falls back to the provider's endpoint; the check runs only when the URL is filtered, because it resolves the host. A provider 5xx now counts as an outage, like a transport error: the review is allowed, held for moderation like every review, and recorded in the transient `ndvr_captcha_unreachable` (`AntiSpam::last_unreachable()`). The Spam Protection card shows the last outage, and the next successful verification clears it.
+- **m4:** `AntiSpam::configured( $provider )` checks for both keys. The checklist is done only when it holds, and the card warns when the chosen provider is missing either key.
+- **m5:** the checklist hint names all three captchas. The POT is regenerated at release (TASKS).
+- **m6:** the product page registers the provider only when this visitor gets a form: comments open, guest rule, and the WooCommerce verified-owners rule (`ReviewForm::form_renders()`). Otherwise `ndvrReviews.captcha.provider` is `none`.
+- **m7:** on save, `recaptcha_enabled` mirrors `provider === 'recaptcha'`, so a rollback or a restored option agrees.
+- **m8:** reCAPTCHA requires a `score`, and an `action` other than `review` is refused. The dead check is removed. The hostname isn't compared, because multi-domain stores would break.
+- **m9:** a render that returns `undefined` is never treated as a widget, and reCAPTCHA `ready()` has a 15 s timeout.
+- **m10:** the readme says the widget runs in the visitor's browser and connects to the provider directly.
+- **m11:** the "Get your keys" links carry a screen-reader "(opens in a new tab)". Static versus injected settings are left as they are.
+- **Harness:** gaps 1 and 2 (the always-pass assertions) are fixed. Gaps 3 and 6–12 are added, along with the M1–M3 build checks, the token cap, the outage note, the URL fallback, the m8 shapes, the m4 warnings and the m6 gating: rr-13 42/42. **Gap 13**, the browser check with the Turnstile and hCaptcha test keys, can't run on this machine (no browser). It is the owner's step before release: one product form, two testimonial forms on one page, error then resubmit, double click, and the console free of the hCaptcha "should not render before js api is fully loaded" warning.
 
 Build notes (2026-10-10):
 - **Build spike** (against the official documentation, checked 2026-10-10):
@@ -126,7 +144,7 @@ Verify against current provider documentation before coding, and record the resu
 
 ## 12. Acceptance criteria
 1. Default install: the rendered product page and the `[ndvr-testimonial]` page enqueue no `ndvr-recaptcha`, `ndvr-turnstile` or `ndvr-hcaptcha` (check `wp_scripts()->queue` after rendering).
-2. Turnstile chosen with keys: only `ndvr-turnstile` is enqueued, and only on a page with a form. That holds for the product page and for a page whose content is `[ndvr-testimonial]` (after `do_shortcode()`), where `ndvr-turnstile` is in `wp_scripts()->registered['ndvr-collect']->deps`. A page without a form enqueues nothing. The built `collect.min.js` contains no `createElement( 'script' )` / `createElement("script")`.
+2. Turnstile chosen with keys: only `ndvr-turnstile` is enqueued, and only on a page with a form. That holds for the product page and for a page whose content is `[ndvr-testimonial]` (after `do_shortcode()`), where `ndvr-turnstile` is in `wp_scripts()->registered['ndvr-collect']->deps`. A page without a form enqueues nothing. collect.js adds a `<script>` only in `legacyRecaptcha()`, for markup cached before RR-13 (rev 4).
 3. Turnstile with a `pre_http_request` stub returning `{"success":true}`: `ndvr_submit_review` succeeds. The captured request URL is the Turnstile siteverify, made through `wp_safe_remote_post` (assert `reject_unsafe_urls` in the request args) with a 5 s timeout and no `remoteip`. A stub returning `{"success":false}` gives 400 with the captcha message.
 4. The same for hCaptcha with its endpoint.
 5. An empty `ndvr_captcha_token` with a provider and secret set gives 400. An old client sending only `ndvr_recaptcha_token` with reCAPTCHA chosen still verifies.

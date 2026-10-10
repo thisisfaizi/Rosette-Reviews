@@ -366,9 +366,10 @@ class DashboardPage implements Registerable {
 				'cta'   => __( 'Import reviews', 'rosette-reviews' ),
 			),
 			array(
-				'done'  => 'none' !== \NdvReviews\Forms\AntiSpam::provider() || ! (bool) $s->get( 'allow_guest_reviews' ),
+				// Done only when the chosen captcha has both keys (it renders and verifies).
+				'done'  => \NdvReviews\Forms\AntiSpam::configured( \NdvReviews\Forms\AntiSpam::provider() ) || ! (bool) $s->get( 'allow_guest_reviews' ),
 				'label' => __( 'Harden the form against spam', 'rosette-reviews' ),
-				'hint'  => __( 'A honeypot and rate limit are always on. reCAPTCHA is optional.', 'rosette-reviews' ),
+				'hint'  => __( 'A honeypot and rate limit are always on. A captcha (reCAPTCHA, Turnstile or hCaptcha) is optional.', 'rosette-reviews' ),
 				'url'   => admin_url( 'admin.php?page=ndv-reviews-settings' ),
 				'cta'   => __( 'Review settings', 'rosette-reviews' ),
 			),

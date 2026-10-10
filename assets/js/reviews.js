@@ -204,27 +204,49 @@
 	}
 
 	// Captcha (RR-13): reCAPTCHA v3, Cloudflare Turnstile or hCaptcha. The
-	// provider script is enqueued before this one; widgets render explicitly.
-	// Tokens are single-use, so the widget resets after every response.
-	var captcha    = ( cfg.captcha && cfg.captcha.provider ) ? cfg.captcha : { provider: 'none', siteKey: '' };
-	var tokenInput = form.querySelector( 'input[name="ndvr_captcha_token"]' );
+	// provider script is enqueued before this one; Turnstile and hCaptcha
+	// widgets render from the provider's onload callback (ndvrCaptchaReady,
+	// AntiSpam::READY_JS), once the API has read its options. Tokens are
+	// single-use: the request is sent only with one, and the widget resets
+	// after every response.
+	var captcha = ( cfg.captcha && cfg.captcha.provider ) ? cfg.captcha : null;
+	if ( ! captcha ) {
+		// A page cached before RR-13 carries only the old reCAPTCHA key.
+		captcha = cfg.siteKey ? { provider: 'recaptcha', siteKey: cfg.siteKey } : { provider: 'none', siteKey: '' };
+	}
+	var tokenInput = form.querySelector( 'input[name="ndvr_captcha_token"], input[name="ndvr_recaptcha_token"]' );
 	var widgetEl   = form.querySelector( '.ndvr-captcha' );
 	var widgetId   = null;
+	var token      = '';
+	var waiters    = [];
+	var busy       = false;
+	var WAIT       = 15000;
 
-	function setToken( token ) {
+	function setToken( value ) {
+		token = value || '';
 		if ( tokenInput ) {
-			tokenInput.value = token || '';
+			tokenInput.value = token;
+		}
+		if ( token ) {
+			var list = waiters;
+			waiters  = [];
+			list.forEach( function ( fn ) { fn( token ); } );
 		}
 	}
 
+	function rendered() {
+		return null !== widgetId && undefined !== widgetId;
+	}
+
 	function renderWidget() {
-		if ( ! widgetEl || null !== widgetId ) {
+		if ( ! widgetEl || rendered() ) {
 			return;
 		}
 		var key = widgetEl.getAttribute( 'data-sitekey' ) || '';
+		var id  = null;
 		try {
 			if ( 'turnstile' === captcha.provider && window.turnstile ) {
-				widgetId = window.turnstile.render( widgetEl, {
+				id = window.turnstile.render( widgetEl, {
 					sitekey: key,
 					'response-field': false,
 					callback: setToken,
@@ -232,76 +254,124 @@
 					'error-callback': function () { setToken( '' ); }
 				} );
 			} else if ( 'hcaptcha' === captcha.provider && window.hcaptcha ) {
-				widgetId = window.hcaptcha.render( widgetEl, {
+				id = window.hcaptcha.render( widgetEl, {
 					sitekey: key,
 					size: 'invisible',
 					callback: setToken,
-					'expired-callback': function () { setToken( '' ); }
+					'expired-callback': function () { setToken( '' ); },
+					'error-callback': function () { setToken( '' ); }
 				} );
 			}
 		} catch ( e ) {
-			widgetId = null;
+			id = null;
 		}
+		// A failed render can return undefined: never treat that as a widget.
+		widgetId = ( 'string' === typeof id || 'number' === typeof id ) ? id : null;
 	}
 
 	function resetCaptcha() {
 		setToken( '' );
+		if ( ! rendered() ) {
+			return;
+		}
 		try {
-			if ( null !== widgetId && 'turnstile' === captcha.provider && window.turnstile ) {
+			if ( 'turnstile' === captcha.provider && window.turnstile ) {
 				window.turnstile.reset( widgetId );
-			} else if ( null !== widgetId && 'hcaptcha' === captcha.provider && window.hcaptcha ) {
+			} else if ( 'hcaptcha' === captcha.provider && window.hcaptcha ) {
 				window.hcaptcha.reset( widgetId );
 			}
 		} catch ( e ) {}
 	}
 
-	renderWidget();
-	if ( widgetEl && null === widgetId ) {
-		window.addEventListener( 'load', renderWidget );
+	if ( widgetEl ) {
+		if ( window.ndvrCaptchaLoaded ) {
+			renderWidget();
+		} else {
+			( window.ndvrCaptchaQueue = window.ndvrCaptchaQueue || [] ).push( renderWidget );
+			// Without the callback (an optimiser that strips it), the API is
+			// initialised by the time the page has loaded.
+			window.addEventListener( 'load', function () {
+				setTimeout( renderWidget, 0 );
+			} );
+		}
 	}
 
-	// Get a fresh token, then submit. A provider that fails or is blocked
-	// submits without one, and the server reports the captcha message.
-	function withCaptcha( callback ) {
-		try {
-			if ( 'recaptcha' === captcha.provider && window.grecaptcha && captcha.siteKey ) {
-				window.grecaptcha.ready( function () {
-					window.grecaptcha.execute( captcha.siteKey, { action: 'review' } ).then( function ( token ) {
-						setToken( token );
-						callback();
-					}, callback );
-				} );
-				return;
+	// Resolve after `ms` with '' unless `start` resolves first.
+	function withTimeout( start, ms ) {
+		return new Promise( function ( resolve ) {
+			var settled = false;
+			function done( value ) {
+				if ( ! settled ) {
+					settled = true;
+					resolve( value || '' );
+				}
 			}
-			if ( 'hcaptcha' === captcha.provider && window.hcaptcha ) {
-				renderWidget();
-				if ( null !== widgetId ) {
-					window.hcaptcha.execute( widgetId, { async: true } ).then( function ( res ) {
-						setToken( res && res.response );
-						callback();
-					}, callback );
+			setTimeout( function () { done( '' ); }, ms );
+			try {
+				start( done );
+			} catch ( e ) {
+				done( '' );
+			}
+		} );
+	}
+
+	// A token for this submission ('' when the verification produced none).
+	function getToken() {
+		if ( 'recaptcha' === captcha.provider ) {
+			return withTimeout( function ( done ) {
+				if ( ! window.grecaptcha || ! captcha.siteKey ) {
+					done( '' );
 					return;
 				}
+				window.grecaptcha.ready( function () {
+					window.grecaptcha.execute( captcha.siteKey, { action: 'review' } ).then( done, function () { done( '' ); } );
+				} );
+			}, WAIT );
+		}
+		if ( 'hcaptcha' === captcha.provider ) {
+			renderWidget();
+			if ( ! rendered() ) {
+				return Promise.resolve( '' );
 			}
-			if ( 'turnstile' === captcha.provider && window.turnstile ) {
-				renderWidget();
-				if ( null !== widgetId && tokenInput && ! tokenInput.value ) {
-					setToken( window.turnstile.getResponse( widgetId ) );
+			// No timeout: the visitor may be solving a challenge.
+			return window.hcaptcha.execute( widgetId, { async: true } ).then( function ( res ) {
+				return ( res && res.response ) || '';
+			}, function () { return ''; } );
+		}
+		if ( 'turnstile' === captcha.provider ) {
+			renderWidget();
+			if ( token ) {
+				return Promise.resolve( token );
+			}
+			if ( ! rendered() ) {
+				return Promise.resolve( '' );
+			}
+			// The challenge may still be running: wait for its callback.
+			return withTimeout( function ( done ) {
+				var current = '';
+				try {
+					current = window.turnstile.getResponse( widgetId ) || '';
+				} catch ( e ) {}
+				if ( current ) {
+					done( current );
+					return;
 				}
-			}
-		} catch ( e ) {}
-		callback();
-	}
-
-	function submit() {
-		// Require at least one star rating before submitting — a rating-less
-		// review would be excluded from the product average.
-		var ratingChecked = form.querySelector( 'input[name^="ndvr_criteria"]:checked' );
-		if ( ! ratingChecked || parseFloat( ratingChecked.value ) <= 0 ) {
-			setMessage( ( cfg.i18n && cfg.i18n.rating ) || 'Please give a star rating before submitting.', 'error' );
-			return;
+				waiters.push( done );
+			}, WAIT );
 		}
 
+		return Promise.resolve( '' );
+	}
+
+	function setBusy( on ) {
+		busy = on;
+		form.classList.toggle( 'is-submitting', on );
+		form.querySelectorAll( '[type="submit"]' ).forEach( function ( btn ) {
+			btn.disabled = on;
+		} );
+	}
+
+	function send() {
 		var data = new FormData( form );
 		data.append( 'action', cfg.action );
 
@@ -309,9 +379,6 @@
 		if ( ! data.get( 'product_id' ) && data.get( 'comment_post_ID' ) ) {
 			data.append( 'product_id', data.get( 'comment_post_ID' ) );
 		}
-
-		form.classList.add( 'is-submitting' );
-		setMessage( ( cfg.i18n && cfg.i18n.submitting ) || 'Submitting…', '' );
 
 		// `action` also travels in the URL: an upload larger than post_max_size
 		// makes PHP drop the body, and admin-ajax.php still needs the action to
@@ -325,7 +392,7 @@
 		} )
 			.then( function ( r ) { return r.json(); } )
 			.then( function ( res ) {
-				form.classList.remove( 'is-submitting' );
+				setBusy( false );
 				resetCaptcha();
 				if ( res && res.success ) {
 					setMessage( ( res.data && res.data.message ) || ( cfg.i18n && cfg.i18n.thanks ), 'success' );
@@ -342,7 +409,7 @@
 				}
 			} )
 			.catch( function () {
-				form.classList.remove( 'is-submitting' );
+				setBusy( false );
 				resetCaptcha();
 				setMessage( ( cfg.i18n && cfg.i18n.error ) || 'Something went wrong.', 'error' );
 			} );
@@ -350,6 +417,32 @@
 
 	form.addEventListener( 'submit', function ( e ) {
 		e.preventDefault();
-		withCaptcha( submit );
+		// One request at a time: a second click would reuse a single-use token.
+		if ( busy ) {
+			return;
+		}
+
+		// Require at least one star rating before anything else (and before a
+		// captcha challenge): a rating-less review would be excluded from the
+		// product average.
+		var ratingChecked = form.querySelector( 'input[name^="ndvr_criteria"]:checked' );
+		if ( ! ratingChecked || parseFloat( ratingChecked.value ) <= 0 ) {
+			setMessage( ( cfg.i18n && cfg.i18n.rating ) || 'Please give a star rating before submitting.', 'error' );
+			return;
+		}
+
+		setBusy( true );
+		setMessage( ( cfg.i18n && cfg.i18n.submitting ) || 'Submitting…', '' );
+		getToken().then( function ( value ) {
+			if ( 'none' !== captcha.provider && ! value ) {
+				// Nothing is sent, so no attempt is used up and the widget keeps
+				// its challenge.
+				setBusy( false );
+				setMessage( ( cfg.i18n && cfg.i18n.captcha ) || 'Please complete the verification, then submit again.', 'error' );
+				return;
+			}
+			setToken( value );
+			send();
+		} );
 	} );
 }() );

@@ -854,3 +854,17 @@ EVIDENCE: rr-11 51/51 (17 new checks); all suites green; debug.log empty; phpcs 
   count; m6 unique hint id; m8 clamp; m9 invalid UTF-8, ENT_HTML5, translator notes. Follow-up RR-12-f1 in TASKS.
 EVIDENCE: rr-12 32/32 (16 new checks, including the shipped length() of both scripts run in node vs the server on 31
 cases); all suites green; debug.log empty; phpcs clean on the changed files.
+
+## 2026-10-10 — RR-13 code review fixed (owner browser check pending)
+- Review `.agents/prd/reviews/code-RR-13.md`: 0 blockers, 4 majors, 11 minors; decisions in PRD RR-13 rev 4.
+  M1 no request without a token (Turnstile waits for its callback, 15 s); M2 cached-page fallbacks (reviews.js siteKey/
+  old input; collect.js legacyRecaptcha() for pre-RR-13 markup only, AC2 amended); M3 onload=ndvrCaptchaReady + inline
+  queue; M4 → RR-13-f1. m1 busy guard; m2 rating first, no POST on rejected execute; m3 token cap, URL fallback, 5xx =
+  outage recorded and shown; m4 configured() + card warning; m5 hint; m6 provider only where a form renders; m7 mirror;
+  m8 score/action; m9; m10 readme; m11 new-tab text.
+- The run was hit by system memory exhaustion (76 MB free; another process). Suites killed mid-run left QA-site state
+  behind: Pro settings (`moderate_photos`, `incentive_enabled`, a test `dev_webhook_url`), `ndv_reviews_pro_incentive_used`
+  and 75 pending test webhook actions. These were removed from the QA site (backups in the session scratchpad); they caused
+  the rr-00b/rr-01 failures, which were not code regressions.
+EVIDENCE: rr-13 42/42 (19 new checks, 2 always-pass assertions fixed); all 17 suites green; debug.log empty; phpcs: no
+new issues (remaining hits are pre-RR-13 lines). No browser check (gap 13): the owner does it before release.

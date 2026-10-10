@@ -102,7 +102,8 @@ class SettingsPage implements Registerable {
 			$schema_mode = 'auto';
 		}
 
-		// One captcha provider (RR-13); `recaptcha_enabled` is no longer written.
+		// One captcha provider (RR-13). `recaptcha_enabled` mirrors it, so older
+		// code (a rollback, a restored option without the new key) agrees.
 		$provider = isset( $_POST['captcha_provider'] ) ? sanitize_key( wp_unslash( $_POST['captcha_provider'] ) ) : 'none';
 		if ( ! in_array( $provider, \NdvReviews\Forms\AntiSpam::PROVIDERS, true ) ) {
 			$provider = 'none';
@@ -115,6 +116,7 @@ class SettingsPage implements Registerable {
 			'photo_uploads'            => ! empty( $_POST['photo_uploads'] ),
 			'max_photos'               => isset( $_POST['max_photos'] ) ? min( self::MAX_PHOTOS, absint( $_POST['max_photos'] ) ) : 5,
 			'captcha_provider'         => $provider,
+			'recaptcha_enabled'        => 'recaptcha' === $provider,
 			'recaptcha_site_key'       => isset( $_POST['recaptcha_site_key'] ) ? sanitize_text_field( wp_unslash( $_POST['recaptcha_site_key'] ) ) : '',
 			'turnstile_site_key'       => isset( $_POST['turnstile_site_key'] ) ? sanitize_text_field( wp_unslash( $_POST['turnstile_site_key'] ) ) : '',
 			'hcaptcha_site_key'        => isset( $_POST['hcaptcha_site_key'] ) ? sanitize_text_field( wp_unslash( $_POST['hcaptcha_site_key'] ) ) : '',
@@ -250,11 +252,38 @@ class SettingsPage implements Registerable {
 							<?php endforeach; ?>
 						</select>
 						<p class="description"><?php esc_html_e( 'A captcha loads a script from the provider on pages that show a review form. It\'s off by default. Choose one only if you get spam.', 'rosette-reviews' ); ?></p>
+						<?php if ( 'none' !== $ndvr_provider && isset( $ndvr_providers[ $ndvr_provider ] ) && ! \NdvReviews\Forms\AntiSpam::configured( $ndvr_provider ) ) : ?>
+							<div class="notice notice-warning inline"><p>
+								<?php
+								printf(
+									/* translators: %s: captcha provider name. */
+									esc_html__( '%s needs both keys. Without the site key no captcha shows; without the secret key nothing is checked.', 'rosette-reviews' ),
+									esc_html( $ndvr_providers[ $ndvr_provider ][0] )
+								);
+								?>
+							</p></div>
+						<?php endif; ?>
+						<?php
+						$ndvr_outage = \NdvReviews\Forms\AntiSpam::last_unreachable();
+						if ( $ndvr_outage && $ndvr_outage['provider'] === $ndvr_provider && isset( $ndvr_providers[ $ndvr_provider ] ) ) :
+							?>
+							<div class="notice notice-warning inline"><p>
+								<?php
+								printf(
+									/* translators: 1: captcha provider name, 2: date and time, 3: error message. */
+									esc_html__( '%1$s could not be reached on %2$s (%3$s). Reviews sent while it is unreachable are accepted without the captcha check and held for moderation. If this keeps happening, check that your server can connect to the provider.', 'rosette-reviews' ),
+									esc_html( $ndvr_providers[ $ndvr_provider ][0] ),
+									esc_html( wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), (int) $ndvr_outage['time'] ) ),
+									esc_html( $ndvr_outage['error'] )
+								);
+								?>
+							</p></div>
+						<?php endif; ?>
 					</div>
 					<?php foreach ( $ndvr_providers as $ndvr_key => $ndvr_def ) : ?>
 						<fieldset class="ndvr-field ndvr-captcha-keys" data-provider="<?php echo esc_attr( $ndvr_key ); ?>" style="margin-top:14px;">
 							<legend style="font-weight:600;"><?php echo esc_html( $ndvr_def[0] ); ?></legend>
-							<p class="description"><a href="<?php echo esc_url( $ndvr_def[1] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Get your keys from the provider', 'rosette-reviews' ); ?></a></p>
+							<p class="description"><a href="<?php echo esc_url( $ndvr_def[1] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Get your keys from the provider', 'rosette-reviews' ); ?><span class="screen-reader-text"> <?php esc_html_e( '(opens in a new tab)', 'rosette-reviews' ); ?></span></a></p>
 							<div class="ndvr-field-row">
 								<div class="ndvr-field">
 									<label for="ndvr-<?php echo esc_attr( $ndvr_key ); ?>-site-key"><?php esc_html_e( 'Site key', 'rosette-reviews' ); ?></label>

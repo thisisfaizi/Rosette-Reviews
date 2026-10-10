@@ -285,3 +285,9 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   chips `[data-ndvr-answer-field="<id>"][data-value="<text>"]` inside a list instance (display.js toggles them); event
   `ndvr:list-request` ( detail: { body: FormData, state } ) before each list fetch. `Exporter::write_csv( $stream )`.
   `show_answers` / `review_field_answers` change the card only (view-model, REST and exports keep every answer).
+- RR-13 rev 4: Turnstile/hCaptcha URLs carry `onload=ndvrCaptchaReady`; `AntiSpam::READY_JS` (inline, before the handle)
+  defines it and drains `window.ndvrCaptchaQueue` (sets `window.ndvrCaptchaLoaded`). The scripts never POST without a token
+  (message `AntiSpam::wait_message()`: `ndvrReviews.i18n.captcha`, testimonial root `data-captcha-message`). `AntiSpam::
+  configured( $p )` (both keys), `TOKEN_MAX` 4096, `UNREACHABLE` transient + `last_unreachable()` (5xx = outage). Product
+  page loads the provider only when the visitor gets a form. `recaptcha_enabled` is mirrored on save (`provider ===
+  'recaptcha'`). reCAPTCHA needs `score` and action `review`.

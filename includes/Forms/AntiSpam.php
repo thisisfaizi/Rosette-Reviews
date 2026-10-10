@@ -37,13 +37,30 @@ class AntiSpam {
 	);
 
 	/**
-	 * Provider script URLs (enqueued only where a form renders).
+	 * Provider script URLs (enqueued only where a form renders). Widgets render
+	 * from the `onload` callback, once the API has read these options.
 	 */
 	const SCRIPT_URLS = array(
-		'turnstile' => 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit',
+		'turnstile' => 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=ndvrCaptchaReady',
 		// recaptchacompat=off: no window.grecaptcha hook clashing with real reCAPTCHA plugins.
-		'hcaptcha'  => 'https://js.hcaptcha.com/1/api.js?render=explicit&recaptchacompat=off',
+		'hcaptcha'  => 'https://js.hcaptcha.com/1/api.js?render=explicit&recaptchacompat=off&onload=ndvrCaptchaReady',
 	);
+
+	/**
+	 * Printed before the Turnstile / hCaptcha script: the `onload` callback that
+	 * runs the queued widget renders of reviews.js and collect.js.
+	 */
+	const READY_JS = 'window.ndvrCaptchaQueue=window.ndvrCaptchaQueue||[];window.ndvrCaptchaReady=function(){var q=window.ndvrCaptchaQueue;window.ndvrCaptchaLoaded=true;window.ndvrCaptchaQueue=[];for(var i=0;i<q.length;i++){try{q[i]();}catch(e){}}};';
+
+	/**
+	 * Longest token sent for verification (Turnstile documents 2048 characters).
+	 */
+	const TOKEN_MAX = 4096;
+
+	/**
+	 * Transient recording the last time a provider couldn't be reached.
+	 */
+	const UNREACHABLE = 'ndvr_captcha_unreachable';
 
 	/**
 	 * Settings accessor.
@@ -267,6 +284,21 @@ class AntiSpam {
 	}
 
 	/**
+	 * Whether a provider has both keys (a widget renders and tokens are
+	 * verified). With only a site key the widget shows but nothing is checked.
+	 *
+	 * @param string $provider Provider.
+	 * @return bool
+	 */
+	public static function configured( $provider ) {
+		if ( '' === self::site_key( $provider ) ) {
+			return false;
+		}
+
+		return '' !== (string) \NdvReviews\Plugin::instance()->container()->get( 'settings' )->get( 'recaptcha' === $provider ? 'recaptcha_secret' : $provider . '_secret', '' );
+	}
+
+	/**
 	 * Register the active provider's script handle (none for reCAPTCHA-less
 	 * stores). Returns the handle, or '' when there is none.
 	 *
@@ -284,9 +316,33 @@ class AntiSpam {
 				: self::SCRIPT_URLS[ $provider ];
 			// The provider serves its own versioned script; no version query.
 			wp_register_script( $handle, $src, array(), null, true ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
+			if ( 'recaptcha' !== $provider ) {
+				wp_add_inline_script( $handle, self::READY_JS, 'before' );
+			}
 		}
 
 		return $handle;
+	}
+
+	/**
+	 * Shown by the form scripts when the verification produced no token (the
+	 * request isn't sent, so no attempt is used up).
+	 *
+	 * @return string
+	 */
+	public static function wait_message() {
+		return __( 'Please complete the verification, then submit again.', 'rosette-reviews' );
+	}
+
+	/**
+	 * The last provider outage (from verify_captcha()), or null.
+	 *
+	 * @return array{time:int,provider:string,error:string}|null
+	 */
+	public static function last_unreachable() {
+		$row = get_transient( self::UNREACHABLE );
+
+		return is_array( $row ) && isset( $row['time'], $row['provider'] ) ? $row + array( 'error' => '' ) : null;
 	}
 
 	/**
@@ -305,7 +361,8 @@ class AntiSpam {
 			return true;
 		}
 
-		if ( '' === $token ) {
+		// Empty, or longer than any real token: refused without a request.
+		if ( '' === $token || strlen( $token ) > self::TOKEN_MAX ) {
 			return new \WP_Error( 'ndvr_spam_captcha', __( 'Captcha verification failed. Please try again.', 'rosette-reviews' ) );
 		}
 
@@ -316,6 +373,12 @@ class AntiSpam {
 		 * @param string $provider recaptcha|turnstile|hcaptcha.
 		 */
 		$url = (string) apply_filters( 'ndv-reviews/captcha_verify_url', self::VERIFY_URLS[ $provider ], $provider );
+		// A filtered URL that isn't a valid public http(s) URL would fail open on
+		// every request; use the provider's own endpoint instead. Checked only
+		// when filtered, because the check resolves the host.
+		if ( self::VERIFY_URLS[ $provider ] !== $url && ! wp_http_validate_url( $url ) ) {
+			$url = self::VERIFY_URLS[ $provider ];
+		}
 
 		// No visitor IP is sent (less personal data).
 		$response = wp_safe_remote_post(
@@ -334,15 +397,30 @@ class AntiSpam {
 			)
 		);
 
-		if ( is_wp_error( $response ) ) {
+		// A transport error or a provider 5xx is an outage, not a verdict.
+		$code = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
+		if ( is_wp_error( $response ) || $code >= 500 ) {
+			$error = is_wp_error( $response ) ? $response : new \WP_Error( 'ndvr_captcha_http_' . $code, sprintf( 'HTTP %d', $code ) );
+			set_transient(
+				self::UNREACHABLE,
+				array(
+					'time'     => time(),
+					'provider' => $provider,
+					'error'    => substr( $error->get_error_message(), 0, 200 ),
+				),
+				WEEK_IN_SECONDS
+			);
+
 			/**
-			 * Fires when a captcha provider can't be reached. The submission is
-			 * allowed, so a network hiccup never loses a real review.
+			 * Fires when a captcha provider can't be reached (or answers 5xx). The
+			 * submission is allowed, so a provider outage never loses a real
+			 * review (it is held for moderation like every review); the settings
+			 * screen shows the last outage.
 			 *
 			 * @param string    $provider Provider.
 			 * @param \WP_Error $error    The request error.
 			 */
-			do_action( 'ndv-reviews/captcha_unreachable', $provider, $response );
+			do_action( 'ndv-reviews/captcha_unreachable', $provider, $error );
 			return true;
 		}
 
@@ -350,6 +428,10 @@ class AntiSpam {
 		$body = is_array( $body ) ? $body : array();
 		if ( true !== ( $body['success'] ?? null ) ) {
 			return new \WP_Error( 'ndvr_spam_captcha', __( 'Captcha verification failed. Please try again.', 'rosette-reviews' ) );
+		}
+		// The provider answers again: clear the outage note.
+		if ( false !== get_transient( self::UNREACHABLE ) ) {
+			delete_transient( self::UNREACHABLE );
 		}
 		if ( 'recaptcha' !== $provider ) {
 			return true;
@@ -362,7 +444,9 @@ class AntiSpam {
 		 */
 		$threshold = (float) apply_filters( 'ndv-reviews/recaptcha_threshold', 0.5 );
 
-		if ( empty( $body['success'] ) || ( isset( $body['score'] ) && (float) $body['score'] < $threshold ) ) {
+		// v3 answers carry a score and the action the form sent; a response
+		// without a score (a v2 key) or for another action is refused.
+		if ( ! isset( $body['score'] ) || (float) $body['score'] < $threshold || ( isset( $body['action'] ) && 'review' !== $body['action'] ) ) {
 			return new \WP_Error( 'ndvr_spam_captcha', __( 'Captcha verification failed. Please try again.', 'rosette-reviews' ) );
 		}
 
