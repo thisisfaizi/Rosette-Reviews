@@ -92,6 +92,8 @@ Free:
   screen, Dismiss; optional hold after N reports from signed-in shoppers or buyers (off by default, never by rating).
 - My Account → Reviews: products waiting for a review, own reviews with status; edit within a window (30 days
   default); published reviews change only after the store applies the edit; "Edited" label; discard for non-rating reasons.
+- Review search in the reviews tab (products with 10+ reviews): text and titles only, highlighted, announced, with filters,
+  works without JS.
 
 Pro:
 - Incentive disclosure on every Pro surface, REST, webhooks and the Google feed (schema 2.4); rating-independent
