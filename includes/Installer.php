@@ -48,6 +48,11 @@ class Installer {
 	const V_FIELDS = 6;
 
 	/**
+	 * RR-14 report a review: ndvr_review_reports table (no data step).
+	 */
+	const V_REPORTS = 7;
+
+	/**
 	 * Lock option (written by raw SQL only, never through add_option()).
 	 */
 	const LOCK_OPTION = 'ndv_reviews_upgrade_lock';
@@ -516,6 +521,24 @@ class Installer {
 			UNIQUE KEY uniq_vote (comment_id, user_id, ip_hash)
 		) {$charset_collate};";
 
+		// Review reports (RR-14). NOT NULL sentinels (user_id 0, ip_hash '') so the
+		// unique key really dedups: NULLs are distinct in MySQL.
+		$tables[] = "CREATE TABLE {$prefix}review_reports (
+			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+			comment_id bigint(20) unsigned NOT NULL,
+			user_id bigint(20) unsigned NOT NULL DEFAULT 0,
+			ip_hash char(64) NOT NULL DEFAULT '',
+			reason varchar(20) NOT NULL,
+			note varchar(300) NOT NULL DEFAULT '',
+			counts tinyint(1) NOT NULL DEFAULT 0,
+			status varchar(20) NOT NULL DEFAULT 'open',
+			created_at datetime NOT NULL,
+			PRIMARY KEY  (id),
+			UNIQUE KEY uniq_report (comment_id, user_id, ip_hash),
+			KEY comment_status (comment_id, status),
+			KEY user_idx (user_id)
+		) {$charset_collate};";
+
 		// Request/automation queue + log.
 		$tables[] = "CREATE TABLE {$prefix}requests (
 			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -680,6 +703,7 @@ class Installer {
 			$prefix . 'review_criteria',
 			$prefix . 'review_media',
 			$prefix . 'review_votes',
+			$prefix . 'review_reports',
 			$prefix . 'requests',
 			$prefix . 'questions',
 			$prefix . 'answers',

@@ -113,6 +113,18 @@
 			return;
 		}
 
+		var report = closest( target, '.ndvr-report' );
+		if ( report ) {
+			toggleReport( report );
+			return;
+		}
+
+		var cancelReport = closest( target, '.ndvr-report-cancel' );
+		if ( cancelReport ) {
+			closeReport( closest( cancelReport, '.ndvr-report-form' ) );
+			return;
+		}
+
 		var helpful = closest( target, '.ndvr-helpful' );
 		if ( helpful ) {
 			if ( ! helpful.disabled && ! helpful.classList.contains( 'is-voted' ) ) {
@@ -412,6 +424,115 @@
 			closeLightbox();
 		}
 	}
+
+	// Report a review (RR-14). Each button controls its own form
+	// (aria-controls); everything is delegated, so cards replaced by the list
+	// AJAX keep working.
+	function reportButton( form ) {
+		return form && form.id ? document.querySelector( '[aria-controls="' + form.id + '"]' ) : null;
+	}
+
+	function toggleReport( btn ) {
+		var form = document.getElementById( btn.getAttribute( 'aria-controls' ) || '' );
+		if ( ! form ) {
+			return;
+		}
+		if ( ! form.hidden ) {
+			closeReport( form );
+			return;
+		}
+		form.hidden = false;
+		btn.setAttribute( 'aria-expanded', 'true' );
+		var first = form.querySelector( 'select, textarea' );
+		if ( first ) {
+			first.focus();
+		}
+	}
+
+	function closeReport( form ) {
+		if ( ! form ) {
+			return;
+		}
+		var btn     = reportButton( form );
+		form.hidden = true;
+		if ( btn ) {
+			btn.setAttribute( 'aria-expanded', 'false' );
+			btn.focus();
+		}
+	}
+
+	function sendReport( form ) {
+		if ( form.ndvrBusy ) {
+			return;
+		}
+		var i18n   = cfg.i18n || {};
+		var status = document.getElementById( form.id + '-status' );
+		var send   = form.querySelector( '.ndvr-report-send' );
+		var body   = new FormData( form );
+		body.append( 'action', cfg.reportAction );
+		body.append( 'nonce', cfg.reportNonce );
+		body.append( 'comment_id', form.getAttribute( 'data-comment-id' ) );
+
+		form.ndvrBusy = true;
+		if ( send ) {
+			send.disabled = true;
+		}
+
+		function done( text, close ) {
+			form.ndvrBusy = false;
+			if ( send ) {
+				send.disabled = false;
+			}
+			if ( close ) {
+				closeReport( form );
+			}
+			// After the form closes, so the message is read with focus back on the button.
+			if ( status ) {
+				status.textContent = text || '';
+			}
+		}
+
+		fetch( cfg.ajaxUrl, { method: 'POST', credentials: 'same-origin', body: body } )
+			.then( function ( r ) {
+				return r.json().then( function ( res ) {
+					return { code: r.status, res: res || {} };
+				} );
+			} )
+			.then( function ( out ) {
+				if ( out.res.success ) {
+					form.reset();
+					done( i18n.reportSent || ( out.res.data && out.res.data.message ), true );
+				} else if ( 409 === out.code ) {
+					done( i18n.reportDuplicate || ( out.res.data && out.res.data.message ), true );
+				} else if ( 429 === out.code ) {
+					done( i18n.reportLimited || ( out.res.data && out.res.data.message ), false );
+				} else {
+					done( ( out.res.data && out.res.data.message ) || i18n.reportError, false );
+				}
+			} )
+			.catch( function () {
+				done( i18n.reportError, false );
+			} );
+	}
+
+	document.addEventListener( 'submit', function ( e ) {
+		var form = closest( e.target, '.ndvr-report-form' );
+		if ( form ) {
+			e.preventDefault();
+			sendReport( form );
+		}
+	} );
+
+	document.addEventListener( 'keydown', function ( e ) {
+		if ( 'Escape' !== e.key ) {
+			return;
+		}
+		var form = closest( e.target, '.ndvr-report-form' );
+		if ( form ) {
+			e.preventDefault();
+			closeReport( form );
+		}
+	} );
 
 	function vote( btn ) {
 		var body = new FormData();

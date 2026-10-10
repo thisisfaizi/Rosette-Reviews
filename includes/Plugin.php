@@ -244,6 +244,13 @@ final class Plugin {
 		);
 
 		$c->set(
+			'reports',
+			static function ( $c ) {
+				return new \NdvReviews\Reviews\Reports( $c->get( 'settings' ), $c->get( 'antispam' ) );
+			}
+		);
+
+		$c->set(
 			'json_ld',
 			static function ( $c ) {
 				return new \NdvReviews\Schema\JsonLd( $c->get( 'settings' ), $c->get( 'review_query' ) );
@@ -540,6 +547,7 @@ final class Plugin {
 			$this->container->get( 'admin_settings_page' ),
 			$this->container->get( 'renderer' ),
 			$this->container->get( 'votes' ),
+			$this->container->get( 'reports' ),
 			$this->container->get( 'json_ld' ),
 			$this->container->get( 'moderation_actions' ),
 			$this->container->get( 'moderation_page' ),

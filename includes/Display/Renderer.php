@@ -116,15 +116,21 @@ class Renderer implements Registerable {
 			'ndvr-display',
 			'ndvrDisplay',
 			array(
-				'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
-				'action'     => self::AJAX_ACTION,
-				'nonce'      => wp_create_nonce( self::NONCE ),
-				'voteAction' => Votes::AJAX_ACTION,
-				'i18n'       => array(
-					'photo' => __( 'Customer photo', 'rosette-reviews' ),
-					'close' => __( 'Close', 'rosette-reviews' ),
-					'prev'  => __( 'Previous photo', 'rosette-reviews' ),
-					'next'  => __( 'Next photo', 'rosette-reviews' ),
+				'ajaxUrl'      => admin_url( 'admin-ajax.php' ),
+				'action'       => self::AJAX_ACTION,
+				'nonce'        => wp_create_nonce( self::NONCE ),
+				'voteAction'   => Votes::AJAX_ACTION,
+				'reportAction' => \NdvReviews\Reviews\Reports::AJAX_ACTION,
+				'reportNonce'  => wp_create_nonce( \NdvReviews\Reviews\Reports::NONCE ),
+				'i18n'         => array(
+					'photo'           => __( 'Customer photo', 'rosette-reviews' ),
+					'close'           => __( 'Close', 'rosette-reviews' ),
+					'prev'            => __( 'Previous photo', 'rosette-reviews' ),
+					'next'            => __( 'Next photo', 'rosette-reviews' ),
+					'reportSent'      => __( 'Thanks. We\'ll take a look.', 'rosette-reviews' ),
+					'reportDuplicate' => __( 'You\'ve already reported this review.', 'rosette-reviews' ),
+					'reportLimited'   => __( 'Too many reports from you. Try again later.', 'rosette-reviews' ),
+					'reportError'     => __( 'Your report could not be sent. Please try again.', 'rosette-reviews' ),
 				),
 			)
 		);

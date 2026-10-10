@@ -1,6 +1,16 @@
 # RR-14: Report a review
 
-Status: prd-ok (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · **Schema `Installer::V_REPORTS`** (planned v5; provisional per PRD-00 §4, the number is taken at merge) · No Pro-facing API, so no `NDVR_API` change
+Status: building (rev 5) · Plan: F · Inherits PRD-00 + RR-00 · **Schema `Installer::V_REPORTS` = 7** (after RR-11's `V_FIELDS` = 6) · No Pro-facing API, so no `NDVR_API` change (stays 8; RR-15 takes 9)
+
+Rev 5 (reconciled with the code after RR-11 to RR-13, before building):
+- **Schema:** `V_REPORTS` is 7 and `NDVR_DB_VERSION` becomes 7. No upgrade step: dbDelta creates the table.
+- **Storefront:** RR-11's list AJAX (`Renderer::ajax_list`, display.js) replaces the cards on every filter or page change. The report button, form, Cancel, Escape and submit are therefore handled by document-level delegation in display.js, like `vote()`. Ids stay per card render (`wp_unique_id`).
+- **One class:** `Reviews\Reports` owns the setting fields, the AJAX handler, the card markup (`review_foot_end`), the re-approval listener, its own `delete_comment` cleanup (`Moderation\Actions::on_delete()` is unchanged; same effect), the F4 view, column and row action, the dashboard chip, the `reports` transparency key, and its own privacy exporter and eraser (group "Review reports you made").
+- **Email:** `Mailer::send_notice( $to, …, [ 'customer' => false ] )`, with recipients like `AdminNotify` (`admin_notify_email`, else the site admin email; nothing when `admin_notify` is `off`).
+- **Status line:** the `role="status"` region follows the form in the card footer, outside it, so it is still announced after the form closes on success. Each card has one.
+- **Column:** "Reports" is added only while at least one open report exists, so stores that never get reports see no empty column.
+- **"Count reports from":** always visible without JS. With JS it shows only when the threshold is above 0.
+- **Rate limit and honeypot:** `AntiSpam::rate_limit( 'report', … )` and the shared honeypot field name. RR-13's captcha isn't added to reporting.
 
 Review findings applied: round 2 RR-14 items 1 (per-instance ids) and 2 (canonical `reports` sentence); round 3 batch B item 9 (report meta in the uninstall registry).
 
@@ -71,7 +81,7 @@ Pro (paired tasks, Pro never edited by free):
 - **Pro task RR-14P-3:** Pro Q&A reporting is out of scope; a Pro follow-up may reuse the table shape.
 
 ## 6. Contract delta
-- **Table** `ndvr_review_reports` (`Installer::V_REPORTS`, provisional v5):
+- **Table** `ndvr_review_reports` (`Installer::V_REPORTS` = 7):
   - `id bigint(20) unsigned NOT NULL AUTO_INCREMENT`, `comment_id bigint(20) unsigned NOT NULL`;
   - `user_id bigint(20) unsigned NOT NULL DEFAULT 0`, `ip_hash char(64) NOT NULL DEFAULT ''`;
   - `reason varchar(20) NOT NULL`, `note varchar(300) NOT NULL DEFAULT ''`;
@@ -98,7 +108,7 @@ Pro (paired tasks, Pro never edited by free):
 - **Uninstall registry (F2):** table via `table_names()`; rate-limit transients `ndvr_rl_report_*` are covered by the existing `ndvr_rl_` sweep (uninstall.php:96-99); comment meta `_ndvr_report_count` and `_ndvr_report_held` in the registry's comment-meta group (native and imported reviews survive uninstall and may carry them).
 
 ## 7. Storage and upgrade
-- `Installer::schema()` gains the table; `NDVR_DB_VERSION` becomes `Installer::V_REPORTS` (provisional v5 per PRD-00 §4; the real number is `max(shipped) + 1` at merge); `table_names()` gains `review_reports`.
+- `Installer::schema()` gains the table; `NDVR_DB_VERSION` becomes `Installer::V_REPORTS` (7); `table_names()` gains `review_reports`.
 - No step: no data to backfill.
 - **Read guard:** the button, the AJAX handler, the view and the chip check `Installer::is_current( Installer::V_REPORTS )`. Before the upgrade runs, the feature is off: no button, and the AJAX returns 503 "Reporting isn't available yet."
 

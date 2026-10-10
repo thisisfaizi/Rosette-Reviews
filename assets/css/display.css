@@ -55,6 +55,9 @@
 .ndvr-topic:focus-visible,
 .ndvr-page:focus-visible,
 .ndvr-helpful:focus-visible,
+.ndvr-report:focus-visible,
+.ndvr-report-send:focus-visible,
+.ndvr-report-cancel:focus-visible,
 .ndvr-bar-row:focus-visible,
 .ndvr-write-review:focus-visible,
 .ndvr-review-photo:focus-visible,
@@ -462,6 +465,52 @@ button.ndvr-bar-row.is-current .ndvr-bar-track { background: var(--ndvr-line); }
 .ndvr-helpful-icon { width: 15px; height: 15px; flex-shrink: 0; }
 .ndvr-helpful:hover { border-color: var(--ndvr-ink); color: var(--ndvr-ink); }
 .ndvr-helpful.is-voted { border-color: var(--ndvr-verdant); color: var(--ndvr-verdant); background: var(--ndvr-verdant-soft); cursor: default; }
+
+/* Report a review (RR-14): a quiet text button, its inline form and status. */
+.ndvr-report {
+	min-height: 36px;
+	background: none;
+	border: 0;
+	padding: 0 6px;
+	color: var(--ndvr-slate);
+	font: inherit;
+	font-size: 0.8em;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: pointer;
+}
+.ndvr-report:hover { color: var(--ndvr-ink); }
+.ndvr-report-form {
+	flex-basis: 100%;
+	margin: 10px 0 0;
+	padding: 12px 14px;
+	border: 1px solid var(--ndvr-line);
+	border-radius: 10px;
+	background: var(--ndvr-paper);
+	font-size: 0.9em;
+}
+.ndvr-report-form[hidden] { display: none; }
+.ndvr-report-field { margin: 0 0 10px; }
+.ndvr-report-field label { display: block; margin-bottom: 4px; font-weight: 600; color: var(--ndvr-ink); }
+.ndvr-report-field select,
+.ndvr-report-field textarea { width: 100%; max-width: 100%; box-sizing: border-box; font: inherit; }
+.ndvr-report-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 0; }
+.ndvr-report-send,
+.ndvr-report-cancel {
+	min-height: 36px;
+	padding: 0 14px;
+	border-radius: 999px;
+	border: 1px solid var(--ndvr-line);
+	background: var(--ndvr-paper);
+	color: var(--ndvr-ink);
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+.ndvr-report-send { background: var(--ndvr-ink); border-color: var(--ndvr-ink); color: var(--ndvr-paper); }
+.ndvr-report-send[disabled] { opacity: 0.6; cursor: default; }
+.ndvr-report-status { font-size: 0.8em; color: var(--ndvr-slate); }
+.ndvr-report-status:empty { display: none; }
 
 .ndvr-no-reviews { color: var(--ndvr-slate); padding: 28px 0; margin: 0; text-align: center; }
 

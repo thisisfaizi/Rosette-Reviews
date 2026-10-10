@@ -872,3 +872,11 @@ new issues (remaining hits are pre-RR-13 lines). No browser check (gap 13): the 
   reviews.js / collect.js (and .min) in a node vm sandbox (stub DOM, widgets, fetch, fake timers): 38 checks; a
   mutation (token gate + busy guard off) fails 4. Wired into rr-13.php → 81/81. The owner's browser check with the
   provider test keys remains the approval gate (real widgets).
+
+## 2026-10-10 — RR-14 report a review: built → in review
+- PRD reconciled first (rev 5): schema 7, document-level delegation (RR-11's list AJAX replaces cards), one
+  `Reviews\Reports` class with its own delete hook and privacy exporter/eraser, `send_notice` for the email.
+- Found while testing: WooCommerce hides `review` comments from queries that don't name the type, so the view count
+  passes `type__in` and `post_type` like ListTable. rr-11's AC1 now accepts the code version (V_FIELDS or later).
+EVIDENCE: rr-14 44/44 (AC1–AC17 + admin view/column/row action/chip, + 14 node checks of the shipped display.js and
+.min); all 18 suites green; debug.log empty; phpcs clean on the changed files.

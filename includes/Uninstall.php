@@ -75,6 +75,8 @@ final class Uninstall {
 				'_ndvr_pooled_from',
 				'_ndvr_incentive_offered',
 				'_ndvr_answers',
+				'_ndvr_report_count',
+				'_ndvr_report_held',
 			),
 			'comment_meta_prefixes' => array(
 				'_ndvr_ans_',

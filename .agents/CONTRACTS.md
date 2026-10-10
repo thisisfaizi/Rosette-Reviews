@@ -291,3 +291,17 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   configured( $p )` (both keys), `TOKEN_MAX` 4096, `UNREACHABLE` transient + `last_unreachable()` (5xx = outage). Product
   page loads the provider only when the visitor gets a form. `recaptcha_enabled` is mirrored on save (`provider ===
   'recaptcha'`). reCAPTCHA needs `score` and action `review`.
+
+## Report a review (RR-14, schema V_REPORTS = 7, no API change)
+- Table `ndvr_review_reports` (id, comment_id, user_id NOT NULL 0, ip_hash char(64) NOT NULL '', reason varchar(20),
+  note varchar(300), counts tinyint, status open|dismissed, created_at; UNIQUE (comment_id, user_id, ip_hash),
+  KEY (comment_id, status), KEY (user_id)). `Installer::V_REPORTS` = 7, `NDVR_DB_VERSION` 7.
+- `Reviews\Reports` (service `reports`): AJAX `ndvr_report_review` (nonce `ndvr_report`; 403/503/400/429/404/400/409),
+  `file( $comment, $reason, $note )`, `dismiss( $id )`, `reasons()`, `open_total()`, `view_url()`. Meta
+  `_ndvr_report_count` (open reports), `_ndvr_report_held` (GMT). Settings `reports_enabled` (true), `reports_threshold`
+  (0–20, 0), `reports_hold_who` (logged_in|verified). Filters `report_reasons`, `report_rate_limit_per_hour` (10),
+  `show_report_button`, `report_counts_toward_hold`; action `review_reported( $id, $reason, $open, $held )`.
+  F4 view `reported`, column `reports`, row action `dismiss_reports`; chip on `dashboard/after_kpis`; transparency key
+  `reports`; exporter/eraser `ndv-reviews-reports`. Card markup on `review_foot_end` (priority 20):
+  `button.ndvr-report[aria-controls]` → `form#ndvr-report-{instance}-{id}.ndvr-report-form[hidden][data-comment-id]`,
+  status `#…-status[role=status]` after the form. `ndvrDisplay.reportAction`, `reportNonce`, `i18n.report*`.

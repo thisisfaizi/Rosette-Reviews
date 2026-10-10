@@ -538,6 +538,12 @@ body.ndvr-admin .ndvr-kpi {
 	text-decoration: none;
 }
 body.ndvr-admin a.ndvr-kpi:hover { border-color: var(--ndvr-slate); }
+/* Overview chips under the KPI row (RR-14 "Reported: n"). */
+body.ndvr-admin .ndvr-dash-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+body.ndvr-admin .ndvr-dash-chip { display: inline-flex; align-items: center; min-height: 32px; padding: 0 14px; border: 1px solid var(--ndvr-line); border-radius: 999px; background: #fff; color: var(--ndvr-ink); font-weight: 600; text-decoration: none; }
+body.ndvr-admin .ndvr-dash-chip.is-alert { border-color: #d63638; color: #b32d2e; }
+body.ndvr-admin .ndvr-dash-chip:hover { border-color: var(--ndvr-slate); }
+body.ndvr-admin .ndvr-dash-chip:focus-visible { outline: 2px solid var(--ndvr-ink); outline-offset: 2px; box-shadow: none; }
 body.ndvr-admin a.ndvr-kpi:focus-visible { outline: 2px solid var(--ndvr-ink); outline-offset: 2px; box-shadow: none; }
 body.ndvr-admin .ndvr-kpi-label { font-size: 12px; font-weight: 600; color: var(--ndvr-slate); }
 body.ndvr-admin .ndvr-kpi-value {

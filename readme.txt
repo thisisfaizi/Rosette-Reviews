@@ -53,6 +53,7 @@ Rosette Reviews replaces the default WooCommerce reviews tab with a review secti
 * Q&A (with an add-on that shows questions): the name a shopper gives, their account id, and, if they ask to be emailed when their question is answered, their email address. Exported and erased with the WordPress privacy tools.
 * Reminder results: the request log records when a customer opened the review link and when they left a review, so the dashboard can show how many orders that got a request led to a review. Two optional extras are off by default: UTM tags on the review link, and a 1×1 image that counts email opens. The image is a form of tracking that some privacy laws require consent for; mention it in your privacy policy if you turn it on. Erasing a customer's personal data cancels any review request still waiting to be sent to them.
 * Checkout consent: if you turn it on, Rosette Reviews saves the customer's answer, the time and the checkbox wording on the order. They are included in WordPress personal data exports and erasures.
+* Review reports: a report stores the reason, the optional note and, for a signed-in shopper, their account id. Their reports are included in personal data exports and removed by erasure. Reports from guests are stored with a one-way hash of their IP address and are deleted with the review or on uninstall.
 
 = Shortcodes =
 
@@ -168,6 +169,7 @@ Only if you turn on "Remove all data on uninstall" in Settings. Reviews created 
 * Captcha choice: Google reCAPTCHA v3, Cloudflare Turnstile or hCaptcha (one, with your own keys; off by default). Stores that used reCAPTCHA keep it.
 * Minimum review length: ask for at least a set number of characters (off by default). Customers see a hint and a counter; imports are not affected.
 * Review questions: ask up to two questions on every review form (a choice such as "How does it fit?", short text, or yes/no), optional or required. Answers show on the review, can be edited by you, and are exported and imported with your reviews. Rosette Reviews → Review Questions.
+* Report a review: shoppers can flag a review as spam, offensive, off-topic or containing personal information, with an optional note. You get one email per reported review and a "Reported" view in All Reviews with the reasons and notes, where you can dismiss reports. Off by default: hold a review for checking after a set number of reports from signed-in shoppers (or shoppers who bought the product); a held review goes back to Pending, nothing is deleted, and the rating never matters.
 
 = 1.0.0 =
 * Initial public release.

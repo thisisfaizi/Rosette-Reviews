@@ -329,7 +329,7 @@ final class NDVR_QA_RR11 {
 		Installer::maybe_upgrade();
 		$exists = false !== $wpdb->query( "SELECT 1 FROM `{$table}` LIMIT 0" );
 		$this->ok( array() === $before && is_int( $id ) && $id > 0, 'AC1: before the upgrade there are no questions and a submission still saves' );
-		$this->ok( $exists && (int) get_option( NDVR_OPTION_DB_VERSION ) === Installer::V_FIELDS, 'AC1: the upgrade creates ndvr_review_fields and stores V_FIELDS' );
+		$this->ok( $exists && (int) get_option( NDVR_OPTION_DB_VERSION ) === (int) NDVR_DB_VERSION && (int) NDVR_DB_VERSION >= Installer::V_FIELDS, 'AC1: the upgrade creates ndvr_review_fields and stores the code version (V_FIELDS or later)' );
 		$this->f()->flush();
 	}
 
