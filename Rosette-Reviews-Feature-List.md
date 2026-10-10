@@ -110,10 +110,11 @@ Pro:
   the review-request address); never for imported, store-added or external reviews. Link opens the review.
 - Answer emails: opt-in on the question form; one email per question for the first store answer (or any approved
   answer); guests get a link only. Question form limited to 5 an hour per visitor.
+- Per-category rating criteria: a criterion can show only for chosen product categories (subcategories included);
+  forms, summary, emailed review page, imports and edits follow each product; one criterion always applies to all.
 - Video uploads: one MP4/WebM/MOV per review on the product form and the emailed review page; off by default;
   guests only if allowed; size limit, hourly site limit; videos on reviews pending 30 days are deleted; plays inline.
 
 ## Not built (do not advertise)
-SMS/WhatsApp sequences (removed — needs approved templates, E.164, opt-in), per-category criteria
-templates, store credit rewards, Gemini, AI insight clustering, Instagram/X posting,
+SMS/WhatsApp sequences (removed — needs approved templates, E.164, opt-in), store credit rewards, Gemini, AI insight clustering, Instagram/X posting,
 TranslatePress, form field builder, Divi/Bricks/Oxygen native elements (shortcodes work), agency features.
