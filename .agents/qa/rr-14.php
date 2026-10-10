@@ -376,7 +376,8 @@ final class NDVR_QA_RR14 {
 		foreach ( (array) $wpdb->get_results( "SHOW COLUMNS FROM `{$t}`" ) as $col ) {
 			$cols[ $col->Field ] = array( $col->Null, $col->Default ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 		}
-		$this->ok( $exists && (int) get_option( NDVR_OPTION_DB_VERSION ) === Installer::V_REPORTS && 7 === Installer::V_REPORTS && (int) NDVR_DB_VERSION === Installer::V_REPORTS, 'AC1: the upgrade creates ndvr_review_reports and stamps version ' . Installer::V_REPORTS );
+		// Forward-compatible: later features raise the code version past V_REPORTS.
+		$this->ok( $exists && (int) get_option( NDVR_OPTION_DB_VERSION ) === (int) NDVR_DB_VERSION && 7 === Installer::V_REPORTS && (int) NDVR_DB_VERSION >= Installer::V_REPORTS, 'AC1: the upgrade creates ndvr_review_reports and stamps the current version (V_REPORTS = 7 or later)' );
 		$this->ok( isset( $cols['user_id'], $cols['ip_hash'], $cols['note'], $cols['counts'], $cols['status'] ) && 'NO' === $cols['user_id'][0] && '0' === (string) $cols['user_id'][1] && 'NO' === $cols['ip_hash'][0] && '' === (string) $cols['ip_hash'][1] && 'open' === trim( (string) $cols['status'][1], "'" ), 'AC1: user_id / ip_hash / status are NOT NULL with defaults 0 / \'\' / open (' . wp_json_encode( $cols ) . ')' );
 	}
 

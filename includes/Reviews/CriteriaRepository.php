@@ -7,6 +7,7 @@
 
 namespace NdvReviews\Reviews;
 
+use NdvReviews\Installer;
 use NdvReviews\Support\Db;
 
 defined( 'ABSPATH' ) || exit;
@@ -23,6 +24,36 @@ class CriteriaRepository {
 	const FREE_MAX = 3;
 
 	/**
+	 * Scope of a criterion limited to product categories (RR-20).
+	 */
+	const SCOPE_CATEGORY = 'category';
+
+	/**
+	 * Active criterion rows for this request (raw rows, so translated names
+	 * are rebuilt on every read). Cleared by every write.
+	 *
+	 * @var array<int,object>|null
+	 */
+	private static $active_rows = null;
+
+	/**
+	 * Category ids (with ancestors) per pool id, for this request.
+	 *
+	 * @var array<int,int[]>
+	 */
+	private static $terms = array();
+
+	/**
+	 * Forget the cached rows (after any write).
+	 *
+	 * @return void
+	 */
+	public static function flush() {
+		self::$active_rows = null;
+		self::$terms       = array();
+	}
+
+	/**
 	 * The maximum number of active criteria allowed (filterable for Pro).
 	 *
 	 * @return int
@@ -37,26 +68,233 @@ class CriteriaRepository {
 	}
 
 	/**
-	 * Get active criteria (optionally for a product, honoring overrides later).
+	 * Get active criteria.
 	 *
-	 * @param int|null $product_id Product id for scope resolution (future use).
+	 * With no product (null or 0): every active criterion, as before RR-20.
+	 * With a product: the active global criteria, then the active criteria
+	 * scoped to any of its pool's categories (ancestors included), each group
+	 * by position, capped at the active cap.
+	 *
+	 * @param int|null $product_id Product id (resolved to its review pool).
 	 * @return Criteria[]
 	 */
 	public function get_active( $product_id = null ) {
-		global $wpdb;
-
-		$table = Db::table( 'criteria' );
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$rows = $wpdb->get_results( "SELECT * FROM `{$table}` WHERE status = 'active' ORDER BY position ASC, id ASC" );
-
-		$out = array();
-		foreach ( (array) $rows as $row ) {
-			$out[] = Criteria::from_row( $row );
+		$all = array();
+		foreach ( $this->active_rows() as $row ) {
+			$all[] = Criteria::from_row( $row );
 		}
 
-		// Enforce the active cap defensively at read time.
-		return array_slice( $out, 0, $this->max_active() );
+		$product_id = absint( $product_id );
+		if ( ! $product_id || ! self::scoping_ready() ) {
+			// Enforce the active cap defensively at read time.
+			return array_slice( $all, 0, $this->max_active() );
+		}
+
+		$pool    = Pool::resolve_id( $product_id );
+		$globals = array();
+		$scoped  = array();
+		foreach ( $all as $criterion ) {
+			if ( ! self::is_scoped( $criterion ) ) {
+				$globals[] = $criterion;
+			} elseif ( $this->applies_to( $criterion, $pool ) ) {
+				$scoped[] = $criterion;
+			}
+		}
+
+		/**
+		 * Filter the criteria a product's reviews are rated on (RR-20).
+		 *
+		 * @param Criteria[] $criteria   Globals first, then the product's category criteria.
+		 * @param int        $product_id The review pool id.
+		 */
+		$criteria = apply_filters( 'ndv-reviews/active_criteria', array_merge( $globals, $scoped ), $pool );
+		$criteria = is_array( $criteria ) ? array_values( array_filter( $criteria, array( __CLASS__, 'is_criteria' ) ) ) : array_merge( $globals, $scoped );
+
+		return array_slice( $criteria, 0, $this->max_active() );
+	}
+
+	/**
+	 * Whether a value is a Criteria object (filter output guard).
+	 *
+	 * @param mixed $value Value.
+	 * @return bool
+	 */
+	private static function is_criteria( $value ) {
+		return $value instanceof Criteria;
+	}
+
+	/**
+	 * The active rows, read once per request.
+	 *
+	 * @return array<int,object>
+	 */
+	private function active_rows() {
+		if ( null === self::$active_rows ) {
+			global $wpdb;
+			$table = Db::table( 'criteria' );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			self::$active_rows = (array) $wpdb->get_results( "SELECT * FROM `{$table}` WHERE status = 'active' ORDER BY position ASC, id ASC" );
+		}
+
+		return self::$active_rows;
+	}
+
+	/**
+	 * Whether the scope column exists (the upgrade to V_CRITERIA_SCOPE ran).
+	 *
+	 * @return bool
+	 */
+	public static function scoping_ready() {
+		return Installer::is_current( Installer::V_CRITERIA_SCOPE );
+	}
+
+	/**
+	 * Whether a criterion is limited to categories (otherwise it is global).
+	 *
+	 * @param Criteria $criterion Criterion.
+	 * @return bool
+	 */
+	public static function is_scoped( Criteria $criterion ) {
+		return self::SCOPE_CATEGORY === $criterion->scope;
+	}
+
+	/**
+	 * Whether a criterion applies to a product's reviews.
+	 *
+	 * @param Criteria $criterion  Criterion.
+	 * @param int      $product_id Product id (resolved to its review pool).
+	 * @return bool
+	 */
+	public function applies_to( Criteria $criterion, $product_id ) {
+		if ( ! self::is_scoped( $criterion ) || ! self::scoping_ready() ) {
+			return true;
+		}
+		if ( ! $criterion->scope_ids ) {
+			return false; // Every chosen category was deleted.
+		}
+
+		// Variations have no categories of their own: use the parent's.
+		return (bool) array_intersect( $criterion->scope_ids, self::pool_terms( Pool::origin_id( Pool::resolve_id( absint( $product_id ) ) ) ) );
+	}
+
+	/**
+	 * A pool's product categories with all their ancestors.
+	 *
+	 * @param int $pool_id Pool id.
+	 * @return int[]
+	 */
+	private static function pool_terms( $pool_id ) {
+		if ( ! isset( self::$terms[ $pool_id ] ) ) {
+			$ids = array();
+			if ( $pool_id && taxonomy_exists( 'product_cat' ) ) {
+				$direct = function_exists( 'wc_get_product_term_ids' ) ? wc_get_product_term_ids( $pool_id, 'product_cat' ) : wp_get_post_terms( $pool_id, 'product_cat', array( 'fields' => 'ids' ) );
+				foreach ( is_array( $direct ) ? $direct : array() as $term_id ) {
+					$ids[] = (int) $term_id;
+					foreach ( get_ancestors( (int) $term_id, 'product_cat', 'taxonomy' ) as $ancestor ) {
+						$ids[] = (int) $ancestor;
+					}
+				}
+			}
+			self::$terms[ $pool_id ] = array_values( array_unique( $ids ) );
+		}
+
+		return self::$terms[ $pool_id ];
+	}
+
+	/**
+	 * Limit a criterion to product categories, or make it global again.
+	 *
+	 * @param int   $id       Criterion id.
+	 * @param int[] $term_ids product_cat term ids; empty means all products.
+	 * @return true|\WP_Error
+	 */
+	public function set_scope( $id, array $term_ids ) {
+		global $wpdb;
+
+		if ( ! self::scoping_ready() ) {
+			return new \WP_Error( 'ndvr_criteria_upgrade', __( 'Finish the Rosette Reviews database update first.', 'rosette-reviews' ) );
+		}
+		$existing = $this->find( $id );
+		if ( ! $existing ) {
+			return new \WP_Error( 'ndvr_criteria_missing', __( 'Criterion not found.', 'rosette-reviews' ) );
+		}
+
+		$ids = array();
+		foreach ( $term_ids as $term_id ) {
+			$term_id = absint( $term_id );
+			if ( $term_id && term_exists( $term_id, 'product_cat' ) ) {
+				$ids[] = $term_id;
+			}
+		}
+		$ids = array_values( array_unique( $ids ) );
+		sort( $ids );
+
+		if ( $ids && ! self::is_scoped( $existing ) && $this->is_last_active( $existing ) ) {
+			return new \WP_Error( 'ndvr_criteria_last_global', __( 'At least one criterion must show for all products, so every product has a star rating.', 'rosette-reviews' ) );
+		}
+
+		$updated = $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			Db::table( 'criteria' ),
+			array(
+				'scope'     => $ids ? self::SCOPE_CATEGORY : 'global',
+				'scope_id'  => null,
+				'scope_ids' => $ids ? implode( ',', $ids ) : null,
+			),
+			array( 'id' => absint( $id ) ),
+			array( '%s', '%d', '%s' ),
+			array( '%d' )
+		);
+		self::flush();
+		if ( false === $updated ) {
+			return new \WP_Error( 'ndvr_criteria_db', __( 'Could not save the criterion.', 'rosette-reviews' ) );
+		}
+
+		/** This action is documented in CriteriaRepository::saved(). */
+		do_action( 'ndv-reviews/criteria_saved', absint( $id ), 'scoped' );
+
+		return true;
+	}
+
+	/**
+	 * "Shows for" text for the admin list.
+	 *
+	 * @param Criteria $criterion Criterion.
+	 * @return string
+	 */
+	public static function scope_label( Criteria $criterion ) {
+		if ( ! self::is_scoped( $criterion ) ) {
+			return __( 'Shows for: All products', 'rosette-reviews' );
+		}
+		$names = array();
+		foreach ( $criterion->scope_ids as $term_id ) {
+			$term = get_term( $term_id, 'product_cat' );
+			if ( $term instanceof \WP_Term ) {
+				$names[] = $term->name;
+			}
+		}
+		if ( ! $names ) {
+			return __( 'Shows for: no categories (hidden)', 'rosette-reviews' );
+		}
+
+		/* translators: %s: comma-separated product category names. */
+		return sprintf( __( 'Shows for: %s', 'rosette-reviews' ), wp_sprintf_l( '%l', $names ) );
+	}
+
+	/**
+	 * Fire `criteria_saved` after a change from the admin.
+	 *
+	 * @param int    $id     Criterion id.
+	 * @param string $change added|toggled|deleted|scoped.
+	 * @return void
+	 */
+	public static function saved( $id, $change ) {
+		/**
+		 * Fires after a criterion is added, toggled, deleted or scoped (RR-20).
+		 *
+		 * @param int    $id     Criterion id.
+		 * @param string $change added|toggled|deleted|scoped.
+		 */
+		do_action( 'ndv-reviews/criteria_saved', absint( $id ), (string) $change );
 	}
 
 	/**
@@ -148,6 +386,8 @@ class CriteriaRepository {
 			array( '%s', '%s', '%s', '%d', '%d', '%s' )
 		);
 
+		self::flush();
+
 		return $inserted ? (int) $wpdb->insert_id : new \WP_Error( 'ndvr_criteria_db', __( 'Could not save the criterion.', 'rosette-reviews' ) );
 	}
 
@@ -205,6 +445,7 @@ class CriteriaRepository {
 		}
 
 		$updated = $wpdb->update( Db::table( 'criteria' ), $fields, array( 'id' => $id ), $format, array( '%d' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		self::flush();
 
 		return false !== $updated;
 	}
@@ -237,6 +478,7 @@ class CriteriaRepository {
 
 		$wpdb->delete( $scores, array( 'criteria_id' => $id ), array( '%d' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		$deleted = $wpdb->delete( Db::table( 'criteria' ), array( 'id' => $id ), array( '%d' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		self::flush();
 
 		$ratings  = new RatingCache();
 		$products = array();
@@ -256,14 +498,25 @@ class CriteriaRepository {
 	}
 
 	/**
-	 * Whether a criterion is the only active one left (removing it would leave
-	 * the review form with no rating field, so every submission would fail).
+	 * Whether a criterion is the only active global one left (removing it
+	 * would leave some products with no rating field, so their submissions
+	 * would fail). A scoped criterion can always be deactivated (RR-20).
 	 *
 	 * @param Criteria $criterion Criterion.
 	 * @return bool
 	 */
 	private function is_last_active( Criteria $criterion ) {
-		return 'active' === $criterion->status && $this->count_active() <= 1;
+		if ( 'active' !== $criterion->status || self::is_scoped( $criterion ) ) {
+			return false;
+		}
+		$globals = 0;
+		foreach ( $this->active_rows() as $row ) {
+			if ( ! self::is_scoped( Criteria::from_row( $row ) ) ) {
+				++$globals;
+			}
+		}
+
+		return $globals <= 1;
 	}
 
 	/**

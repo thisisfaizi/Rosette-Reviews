@@ -32,10 +32,10 @@ defined( 'ABSPATH' ) || exit;
  * ---------------------------------------------------------------------------
  */
 define( 'NDVR_VERSION', '1.0.0' );
-define( 'NDVR_DB_VERSION', '7' );
+define( 'NDVR_DB_VERSION', '8' );
 // Public API level for add-ons (RR-00 F3b). Raised by each release that adds
 // API an add-on may use; add-ons check it instead of method_exists()/versions.
-define( 'NDVR_API', 10 );
+define( 'NDVR_API', 11 );
 define( 'NDVR_SLUG', 'rosette-reviews' );
 define( 'NDVR_NAME', 'Rosette Reviews' );
 define( 'NDVR_TEXTDOMAIN', 'rosette-reviews' );

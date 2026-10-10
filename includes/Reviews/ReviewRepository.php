@@ -130,7 +130,7 @@ class ReviewRepository {
 		// A review without a rating would display but be left out of the product
 		// average, so it is rejected here — every caller (forms, landing, import)
 		// goes through this check before anything is stored.
-		$scores       = $this->valid_scores( isset( $data['criteria'] ) ? (array) $data['criteria'] : array() );
+		$scores       = $this->valid_scores( isset( $data['criteria'] ) ? (array) $data['criteria'] : array(), $pool_id );
 		$plain_rating = 0.0;
 		if ( empty( $scores ) ) {
 			$plain_rating = isset( $data['rating'] ) && is_numeric( $data['rating'] ) ? (float) $data['rating'] : 0.0;
@@ -293,12 +293,14 @@ class ReviewRepository {
 	 * Public so the forms can reject a rating-less submission before storing
 	 * any uploaded photo.
 	 *
-	 * @param array<int|string,mixed> $scores Map criteria_id => rating (raw input).
+	 * @param array<int|string,mixed> $scores     Map criteria_id => rating (raw input).
+	 * @param int                     $product_id Product the review is for: only criteria that
+	 *                                            apply to its pool count (RR-20). 0 = every active criterion.
 	 * @return array<int,float> Valid criteria_id => rating.
 	 */
-	public function valid_scores( array $scores ) {
+	public function valid_scores( array $scores, $product_id = 0 ) {
 		$active = array();
-		foreach ( $this->criteria->get_active() as $criterion ) {
+		foreach ( $this->criteria->get_active( absint( $product_id ) ) as $criterion ) {
 			$active[ (int) $criterion->id ] = true;
 		}
 

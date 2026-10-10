@@ -112,7 +112,7 @@ class Summary {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT cr.name AS name, AVG( rc.rating ) AS average, cr.position AS position
+				"SELECT rc.criteria_id AS id, cr.name AS name, AVG( rc.rating ) AS average, cr.position AS position
 				FROM {$rc} rc
 				INNER JOIN {$wpdb->comments} c ON c.comment_ID = rc.comment_id
 				INNER JOIN {$criteria} cr ON cr.id = rc.criteria_id
@@ -124,8 +124,23 @@ class Summary {
 			)
 		);
 
+		// RR-20: a category criterion that doesn't apply to this product is left
+		// out, even if old reviews hold a score for it. Global ones always show.
+		$repo   = \NdvReviews\Plugin::instance()->container()->get( 'criteria' );
+		$scoped = array();
+		if ( \NdvReviews\Reviews\CriteriaRepository::scoping_ready() ) {
+			foreach ( $repo->get_all() as $criterion ) {
+				if ( \NdvReviews\Reviews\CriteriaRepository::is_scoped( $criterion ) ) {
+					$scoped[ (int) $criterion->id ] = $criterion;
+				}
+			}
+		}
+
 		$out = array();
 		foreach ( (array) $rows as $row ) {
+			if ( isset( $scoped[ (int) $row->id ] ) && ! $repo->applies_to( $scoped[ (int) $row->id ], (int) $product_id ) ) {
+				continue;
+			}
 			$out[] = array(
 				'name'    => (string) $row->name,
 				'average' => round( (float) $row->average, 2 ),

@@ -50,6 +50,13 @@ class Criteria {
 	public $scope_id;
 
 	/**
+	 * Product category ids a scoped criterion shows for (RR-20); empty for global.
+	 *
+	 * @var int[]
+	 */
+	public $scope_ids = array();
+
+	/**
 	 * Sort position.
 	 *
 	 * @var int
@@ -84,6 +91,10 @@ class Criteria {
 		$c->scope_id      = isset( $row['scope_id'] ) && null !== $row['scope_id'] ? (int) $row['scope_id'] : null;
 		$c->position      = isset( $row['position'] ) ? (int) $row['position'] : 0;
 		$c->status        = isset( $row['status'] ) ? (string) $row['status'] : 'active';
+
+		// RR-20: comma-separated product_cat ids (NULL or '' = global).
+		$raw          = isset( $row['scope_ids'] ) ? (string) $row['scope_ids'] : '';
+		$c->scope_ids = '' !== $raw ? array_values( array_filter( array_map( 'absint', explode( ',', $raw ) ) ) ) : array();
 
 		return $c;
 	}

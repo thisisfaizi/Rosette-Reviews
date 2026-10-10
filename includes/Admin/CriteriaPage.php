@@ -93,6 +93,9 @@ class CriteriaPage implements Registerable {
 			$name   = isset( $_POST['ndvr_name'] ) ? sanitize_text_field( wp_unslash( $_POST['ndvr_name'] ) ) : '';
 			$result = $this->criteria->insert( array( 'name' => $name ) );
 			$this->push_result( $result, __( 'Criterion added.', 'rosette-reviews' ) );
+			if ( ! is_wp_error( $result ) ) {
+				CriteriaRepository::saved( (int) $result, 'added' );
+			}
 		} elseif ( 'delete' === $do ) {
 			$id = isset( $_POST['ndvr_id'] ) ? absint( $_POST['ndvr_id'] ) : 0;
 			$result = $this->criteria->delete( $id );
@@ -100,11 +103,32 @@ class CriteriaPage implements Registerable {
 				$result = new \WP_Error( 'ndvr_criteria_missing', __( 'That criterion no longer exists.', 'rosette-reviews' ) );
 			}
 			$this->push_result( $result, __( 'Criterion deleted.', 'rosette-reviews' ) );
+			if ( ! is_wp_error( $result ) ) {
+				CriteriaRepository::saved( $id, 'deleted' );
+			}
 		} elseif ( 'toggle' === $do ) {
 			$id      = isset( $_POST['ndvr_id'] ) ? absint( $_POST['ndvr_id'] ) : 0;
 			$status  = isset( $_POST['ndvr_status'] ) && 'active' === $_POST['ndvr_status'] ? 'active' : 'inactive';
 			$result  = $this->criteria->update( $id, array( 'status' => $status ) );
 			$this->push_result( $result, __( 'Criterion updated.', 'rosette-reviews' ) );
+			if ( ! is_wp_error( $result ) ) {
+				CriteriaRepository::saved( $id, 'toggled' );
+			}
+		} else {
+			$id = isset( $_POST['ndvr_id'] ) ? absint( $_POST['ndvr_id'] ) : 0;
+
+			/**
+			 * Handle a Rating Criteria action this page doesn't know (RR-20; Pro's
+			 * "Show for"). Runs only after the capability and nonce checks.
+			 *
+			 * @param true|\WP_Error|null $result null when not handled.
+			 * @param string              $do     The posted ndvr_criteria_do value.
+			 * @param int                 $id     The posted criterion id (0 when none).
+			 */
+			$result = apply_filters( 'ndv-reviews/criteria_handle_action', null, $do, $id );
+			if ( null !== $result ) {
+				$this->push_result( $result, __( 'Criterion updated.', 'rosette-reviews' ) );
+			}
 		}
 	}
 
@@ -180,7 +204,12 @@ class CriteriaPage implements Registerable {
 						<?php endif; ?>
 						<?php foreach ( $all as $criterion ) : ?>
 							<tr>
-								<td><?php echo esc_html( $criterion->name ); ?></td>
+								<td>
+									<?php echo esc_html( $criterion->name ); ?>
+									<?php if ( CriteriaRepository::scoping_ready() ) : ?>
+										<br /><span class="description"><?php echo esc_html( CriteriaRepository::scope_label( $criterion ) ); ?></span>
+									<?php endif; ?>
+								</td>
 								<td><?php echo esc_html( 'active' === $criterion->status ? __( 'Active', 'rosette-reviews' ) : __( 'Inactive', 'rosette-reviews' ) ); ?></td>
 								<td>
 									<form method="post" style="display:inline;">
@@ -198,6 +227,14 @@ class CriteriaPage implements Registerable {
 											<?php esc_html_e( 'Delete', 'rosette-reviews' ); ?>
 										</button>
 									</form>
+									<?php
+									/**
+									 * Print more controls in a criterion's actions cell (RR-20; Pro's "Show for").
+									 *
+									 * @param Criteria $criterion Criterion.
+									 */
+									do_action( 'ndv-reviews/criteria_row_after', $criterion );
+									?>
 								</td>
 							</tr>
 						<?php endforeach; ?>

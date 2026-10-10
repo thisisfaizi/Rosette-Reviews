@@ -53,6 +53,12 @@ class Installer {
 	const V_REPORTS = 7;
 
 	/**
+	 * RR-20 per-category criteria: ndvr_criteria.scope_ids (no data step;
+	 * NULL means global).
+	 */
+	const V_CRITERIA_SCOPE = 8;
+
+	/**
 	 * Lock option (written by raw SQL only, never through add_option()).
 	 */
 	const LOCK_OPTION = 'ndv_reviews_upgrade_lock';
@@ -462,6 +468,7 @@ class Installer {
 			slug varchar(191) NOT NULL,
 			scope varchar(20) NOT NULL DEFAULT 'global',
 			scope_id bigint(20) unsigned DEFAULT NULL,
+			scope_ids text DEFAULT NULL,
 			position int(11) NOT NULL DEFAULT 0,
 			status varchar(20) NOT NULL DEFAULT 'active',
 			PRIMARY KEY  (id),

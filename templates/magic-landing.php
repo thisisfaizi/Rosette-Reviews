@@ -10,7 +10,8 @@
  * @var bool                  $valid       Whether the token resolved.
  * @var string                $token       Raw token (re-submitted with each review).
  * @var int[]                 $products    Pending product ids.
- * @var array                 $criteria    Active criteria objects.
+ * @var array                 $criteria    Active criteria objects (all products).
+ * @var array                 $criteria_by_product Product id => the criteria for its categories (RR-20).
  * @var string                $nonce       AJAX nonce.
  * @var string                $ajax_url    admin-ajax URL.
  * @var string                $ajax_action AJAX action name.
@@ -74,9 +75,13 @@ endif;
 			</div>
 
 			<div class="ndvr-fields">
-				<?php if ( ! empty( $criteria ) ) : ?>
+				<?php
+				// RR-20: each product rates on the criteria for its own categories.
+				$ndvr_criteria = isset( $criteria_by_product[ $ndvr_pid ] ) ? $criteria_by_product[ $ndvr_pid ] : $criteria;
+				?>
+				<?php if ( ! empty( $ndvr_criteria ) ) : ?>
 					<div class="ndvr-criteria-group">
-						<?php foreach ( $criteria as $ndvr_c ) : ?>
+						<?php foreach ( $ndvr_criteria as $ndvr_c ) : ?>
 							<fieldset class="ndvr-criterion">
 								<legend class="ndvr-criterion-label"><?php echo esc_html( $ndvr_c->name ); ?></legend>
 								<div class="ndvr-stars" role="radiogroup" aria-label="<?php echo esc_attr( $ndvr_c->name ); ?>">
@@ -147,9 +152,9 @@ endif;
 				 * product id. File inputs are sent (the form posts FormData).
 				 *
 				 * @param int   $product_id Product id.
-				 * @param array $criteria   Active criteria.
+				 * @param array $criteria   This product's criteria (RR-20).
 				 */
-				do_action( 'ndv-reviews/landing_form_fields', (int) $ndvr_pid, $criteria );
+				do_action( 'ndv-reviews/landing_form_fields', (int) $ndvr_pid, $ndvr_criteria );
 				?>
 
 				<p class="ndvr-field ndvr-field-consent">

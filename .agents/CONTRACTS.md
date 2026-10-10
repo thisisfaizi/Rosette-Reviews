@@ -354,3 +354,12 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   `ReviewSearch::clean( $raw )` (plain text, ≤ 200 chars); queries are not HTML-sanitised, every output escapes them. The
   rate limit counts only uncached lookups. Clear is `a.ndvr-search-clear[href]`. `ndvrDisplay.i18n.listError`. A product
   page with `?ndvr_q=` is noindex,follow. Matching is accent-sensitive.
+- RR-20 (NDVR_API 11, DB 8 `Installer::V_CRITERIA_SCOPE`): `ndvr_criteria.scope_ids` (comma-separated product_cat ids; NULL =
+  global); `Criteria::$scope_ids` (int[]). `CriteriaRepository::get_active( $product_id = null )` (null/0 = all active),
+  `applies_to( Criteria, $product_id )`, `set_scope( $id, int[] )` (true|WP_Error `ndvr_criteria_last_global`,
+  `ndvr_criteria_upgrade`, `ndvr_criteria_missing`), static `flush()`, `scoping_ready()`, `is_scoped()`, `scope_label()`,
+  `saved( $id, $change )`. `ReviewRepository::valid_scores( $scores, $product_id = 0 )`. Filter
+  `ndv-reviews/active_criteria( Criteria[], $pool_id )`; filter `ndv-reviews/criteria_handle_action( null, $do, $id )` →
+  true|WP_Error|null; actions `ndv-reviews/criteria_row_after( Criteria )`, `ndv-reviews/criteria_saved( $id, $change )`.
+  Template variable `$criteria_by_product` (magic-landing.php). The last active **global** criterion can't be
+  deactivated, deleted or scoped.

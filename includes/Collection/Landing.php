@@ -199,6 +199,9 @@ class Landing implements Registerable {
 					'is_test'        => $row && 'test' === $row->type,
 					'review_fields'  => \NdvReviews\Plugin::instance()->container()->get( 'review_fields' )->get_active(),
 					'review_source'  => $row && 'list' === $row->type ? 'list_link' : 'magic_link',
+				) + array(
+					// RR-20: each product's own criteria.
+					'criteria_by_product' => $this->criteria_by_product( $pending ),
 				)
 			);
 			$this->output_page( $html );
@@ -329,7 +332,7 @@ class Landing implements Registerable {
 				wp_send_json_error( array( 'message' => __( 'Please choose a rating between 1 and 5 stars.', 'rosette-reviews' ) ), 400 );
 			}
 		}
-		$criteria = $this->reviews->valid_scores( $raw_scores );
+		$criteria = $this->reviews->valid_scores( $raw_scores, $product_id );
 
 		if ( empty( $criteria ) ) {
 			wp_send_json_error( array( 'message' => __( 'Please give a star rating before submitting your review.', 'rosette-reviews' ) ), 400 );
@@ -508,6 +511,21 @@ class Landing implements Registerable {
 		$initial = function_exists( 'mb_strtoupper' ) ? mb_strtoupper( $initial ) : strtoupper( $initial );
 
 		return $first . ' ' . $initial . '.';
+	}
+
+	/**
+	 * Each pending product's criteria, for its categories (RR-20).
+	 *
+	 * @param int[] $product_ids Product ids.
+	 * @return array<int,\NdvReviews\Reviews\Criteria[]>
+	 */
+	private function criteria_by_product( $product_ids ) {
+		$out = array();
+		foreach ( (array) $product_ids as $product_id ) {
+			$out[ (int) $product_id ] = $this->criteria->get_active( (int) $product_id );
+		}
+
+		return $out;
 	}
 
 	/**

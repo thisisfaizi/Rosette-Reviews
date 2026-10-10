@@ -110,8 +110,8 @@ class Csv {
 			}
 		}
 
-		// A single overall rating is applied to every active criterion, so the
-		// review's overall score equals the CSV rating.
+		// A single overall rating is applied to every criterion of the row's
+		// product (RR-20), so the review's overall score equals the CSV rating.
 		$criteria_ids = array();
 		foreach ( $this->criteria->get_active() as $criterion ) {
 			$criteria_ids[] = (int) $criterion->id;
@@ -158,8 +158,12 @@ class Csv {
 				$answers[ $field_id ] = $get( $column );
 			}
 
-			$rating   = round( (float) $rating_raw, 2 );
-			$criteria = array_fill_keys( $criteria_ids, $rating );
+			$rating = round( (float) $rating_raw, 2 );
+			$ids    = array();
+			foreach ( $this->criteria->get_active( $pool_id ) as $criterion ) {
+				$ids[] = (int) $criterion->id;
+			}
+			$criteria = array_fill_keys( $ids, $rating );
 			$status   = strtolower( $get( 'status' ) );
 
 			$created = $this->reviews->create(

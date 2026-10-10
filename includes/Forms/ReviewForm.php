@@ -430,7 +430,8 @@ class ReviewForm implements Registerable {
 	 * @return string
 	 */
 	private function render_fields() {
-		$criteria = $this->criteria->get_active();
+		// The criteria for this product's categories (RR-20).
+		$criteria = $this->criteria->get_active( (int) get_the_ID() );
 		$captcha  = AntiSpam::active();
 
 		ob_start();
@@ -605,7 +606,7 @@ class ReviewForm implements Registerable {
 		// rating-less review would display but be left out of the product
 		// average. Checked BEFORE any file upload so a bad submission never
 		// stores attachments; create() repeats the same check.
-		$criteria = $this->reviews->valid_scores( isset( $input['ndvr_criteria'] ) && is_array( $input['ndvr_criteria'] ) ? $input['ndvr_criteria'] : array() );
+		$criteria = $this->reviews->valid_scores( isset( $input['ndvr_criteria'] ) && is_array( $input['ndvr_criteria'] ) ? $input['ndvr_criteria'] : array(), $product_id );
 		if ( empty( $criteria ) ) {
 			wp_send_json_error( array( 'message' => __( 'Please give a star rating before submitting your review.', 'rosette-reviews' ) ), 400 );
 		}

@@ -151,7 +151,9 @@ class ReviewEditor {
 				$allowed[ $criteria_id ] = $all[ $criteria_id ];
 			}
 		}
-		foreach ( (array) $this->criteria->get_active() as $criterion ) {
+		// RR-20: the criteria for the review's product, as on its form.
+		$comment = get_comment( absint( $comment_id ) );
+		foreach ( (array) $this->criteria->get_active( $comment ? (int) $comment->comment_post_ID : 0 ) as $criterion ) {
 			$allowed[ (int) $criterion->id ] = $criterion;
 		}
 

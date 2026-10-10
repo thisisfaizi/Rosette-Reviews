@@ -169,7 +169,7 @@ class TestimonialForm implements Registerable {
 	 * @return string
 	 */
 	private function render( $product_id, $title ) {
-		$criteria = $this->criteria->get_active();
+		$criteria = $this->criteria->get_active( (int) $product_id );
 		// Per-instance prefix so two forms on one page don't share element ids.
 		$prefix = wp_unique_id( 'ndvr-t' ) . '-';
 
@@ -294,7 +294,7 @@ class TestimonialForm implements Registerable {
 
 		// Require at least one valid star rating — same rule as ReviewForm, checked
 		// before any upload is stored.
-		$criteria = $this->reviews->valid_scores( isset( $input['ndvr_criteria'] ) && is_array( $input['ndvr_criteria'] ) ? $input['ndvr_criteria'] : array() );
+		$criteria = $this->reviews->valid_scores( isset( $input['ndvr_criteria'] ) && is_array( $input['ndvr_criteria'] ) ? $input['ndvr_criteria'] : array(), $product_id );
 		if ( empty( $criteria ) ) {
 			wp_send_json_error( array( 'message' => __( 'Please give a star rating before submitting your review.', 'rosette-reviews' ) ), 400 );
 		}

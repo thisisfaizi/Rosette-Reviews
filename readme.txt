@@ -148,6 +148,7 @@ Only if you turn on "Remove all data on uninstall" in Settings. Reviews created 
 == Changelog ==
 
 = Unreleased =
+* Rating criteria can apply to chosen product categories (set with Rosette Reviews Pro, or in code): each product's review form, summary, review page from your emails, CSV import and My Account edits use the criteria for its categories. At least one criterion always applies to every product. The Rating Criteria screen shows what each criterion is shown for.
 * A link to one review (for example from a store reply email) now opens the Reviews tab and scrolls to the review.
 * Database updates now run on any request, not only in the admin, under a lock, so scheduled emails never meet an old database. A failed update retries after an hour and shows a notice.
 * Reactivating after uploading a new version now runs pending database updates.

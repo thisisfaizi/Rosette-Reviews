@@ -926,3 +926,8 @@ EVIDENCE: rr-16 42/42; all 21 suites green; debug.log empty; phpcs: no new issue
   hidden or not on the first page, then scroll. Other hashes are left to WooCommerce. No API change.
 - TASKS: owner checks OC-10 (RR-17 real server and mail clients), OC-11 (Pro on a real free 1.0.0), OC-12 (RR-18 real upload).
 EVIDENCE: rr-16-js.mjs 24/24 (8 new); rr-16.php green.
+
+## 2026-10-11 — RR-20 per-category rating criteria built → in_review
+- PRD rev 4 reconciled (V_CRITERIA_SCOPE 8, NDVR_API 11, RR-15 edits as a new caller, a per-request cache), rev 5 as built.
+- `criteria_handle_action` became a filter so Pro can report refusals; variations use the parent's categories.
+EVIDENCE: rr-20 30/30; 16 mutations (14 caught, 2 equivalent); Pro rr-20p 14/14 (5 mutations caught); phpcs: no new issues.

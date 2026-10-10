@@ -1,8 +1,26 @@
 # RR-20: Per-category rating criteria
 
-Status: prd-ok (rev 3) · Plan: F (data layer, resolution, hooks) + P (the "Show for" UI) · Inherits PRD-00 + RR-00 · **Schema `Installer::V_CRITERIA_SCOPE`** (planned v8; provisional per PRD-00 §4, the number is taken at merge) · Raises `NDVR_API` to **10** (RR-00 F3b; planned build order, final at merge)
+Status: in_review (rev 5) · Plan: F (data layer, resolution, hooks) + P (the "Show for" UI) · Inherits PRD-00 + RR-00 · **Schema `Installer::V_CRITERIA_SCOPE`** (planned v8; provisional per PRD-00 §4, the number is taken at merge) · Raises `NDVR_API` to **10** (RR-00 F3b; planned build order, final at merge)
 
 Round 2: passed; rev 3 only updates references to the shared rules (version constant, `NDVR_API` level).
+
+Rev 5 (as built):
+- **`criteria_handle_action` is a filter, not an action:** `apply_filters( 'ndv-reviews/criteria_handle_action', null, $do, $id )` returns null (not handled), true, or a WP_Error, which the page shows as its usual notice ("Criterion updated." or the error). Pro needs this to show free's "At least one criterion must show for all products…" refusal. It still runs only after the capability and nonce checks.
+- **Scope values:** a scoped criterion is `scope = 'category'` with sorted, de-duplicated, existing `product_cat` ids; a criterion whose categories were all deleted applies to no product and its row reads "Shows for: no categories (hidden)". `set_scope( $id, [] )` makes it `global` again (`scope_ids` NULL). Before the upgrade `set_scope()` returns `ndvr_criteria_upgrade`.
+- **Variations:** categories come from `Pool::origin_id( Pool::resolve_id( $id ) )`, so a variation uses its parent's categories with or without Pro's variation pooling.
+- **Cache:** the active rows are read once per request (`CriteriaRepository::flush()` clears them; every write calls it); names are rebuilt on each read so `criteria_name` translations follow the current locale. Category ids per pool are cached the same way.
+- **Free admin:** the row text sits under the criterion name ("Shows for: All products" / the category names), shown once the upgrade has run. `criteria_saved` fires for added, toggled, deleted (from the page) and scoped (from `set_scope()`).
+- **Landing:** `criteria_by_product` is added to the template variables; `landing_form_fields` now receives the product's own criteria.
+- **Tests:** rr-20.php 30/30 (AC1–AC13 plus edits, set_scope rules, deleted categories, one query for four products); 16 mutations, 14 caught; the 2 survivors are equivalent (the read guard is repeated in `applies_to()`; the CSV importer's per-product list is also enforced by `create()`). Pro rr-20p.php 14/14, 5 mutations caught.
+
+Rev 4 (reconciled with the code after RR-11 to RR-17, before building):
+- **Numbers taken:** `Installer::V_CRITERIA_SCOPE` = **8** (`NDVR_DB_VERSION` 8; V_REPORTS took 7) and `NDVR_API` **11** (RR-16 took 10). Every "10" in §6 and §5's Pro tasks means 11.
+- **Callers today** (line numbers moved): `ReviewForm::render_fields()` `get_active()` :433 and `handle_submit()` `valid_scores()` :608; `TestimonialForm` :172 and :297; `Landing::maybe_render()` :193 and `handle_submit()` :332; `ReviewRepository::create()` :133 (`valid_scores` already sees `$pool_id` from :101); `Importers\Csv` :116 (once, before the rows; it resolves the pool per row at :149).
+- **New caller, RR-15 edits:** `ReviewEditor::allowed_criteria( $comment_id )` returns the review's stored criteria plus **all** active ones (:154). It becomes stored ones plus `get_active( pool of the review )`, so My Account's edit form offers the same criteria as the product form. A stored score for a criterion that no longer applies stays editable (it's the review's own history, as in §5 "Unchanged").
+- **Read cost:** `get_active()` runs one query per call with no cache, and the landing page now calls it per product. A per-request static cache of the active rows (cleared on insert/update/delete/set_scope) keeps it one query per request.
+- **Summary:** `Summary::criteria_averages( $product_id )` (:106) joins stored scores to criteria by pool; scoped criteria that don't apply to the pool are dropped in PHP after the query (needs `applies_to()`), globals unchanged.
+- **Pro (paired, this build):** RR-20P-1 "Show for" UI through `criteria_row_after` / `criteria_handle_action`; RR-20P-2 `ManualReviews` :267 (criteria per chosen product: the form lists all active criteria with a `data-ndvr-scope` attribute, and the save keeps only those that apply, through `valid_scores( $scores, $product_id )`); RR-20P-3 `ProImporter` :727 (`get_active( Pool::resolve_id( $product_id ) )` per row). All gated on `ProPlugin::free_api( 11 )`; below it Pro behaves as today and calls `require_free_update( 'category criteria' )`.
+- **Free admin row text:** "Shows for: All products" or the category names; scoped rows from an unknown or deleted term show the remaining names, or "Shows for: no categories (hidden)" when none are left.
 
 ## 1. Problem and who it's for
 "Fit" makes sense for shoes, not for coffee. Multi-category stores either drop useful criteria or ask irrelevant ones. YITH's review boxes let criteria differ by category. Our `ndvr_criteria` table already has `scope`/`scope_id` columns (Installer.php:65-75), and `CriteriaRepository::get_active( $product_id )` has an unused parameter marked "future use" (CriteriaRepository.php:39-60).
