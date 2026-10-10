@@ -88,6 +88,8 @@ Free:
 - Minimum review length (off by default): hint, live counter, one screen-reader update; imports exempt.
 - Captcha choice: Google reCAPTCHA v3, Cloudflare Turnstile or hCaptcha (one, own keys, off by default); loads only
   where the visitor can submit; the form waits for the check; outages shown on the settings card.
+- Report a review: reason + optional note, one per reporter; email (capped), Reported view, every note on the edit
+  screen, Dismiss; optional hold after N reports from signed-in shoppers or buyers (off by default, never by rating).
 
 Pro:
 - Incentive disclosure on every Pro surface, REST, webhooks and the Google feed (schema 2.4); rating-independent
