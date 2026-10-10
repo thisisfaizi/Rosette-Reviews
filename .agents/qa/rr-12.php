@@ -59,6 +59,13 @@ final class NDVR_QA_RR12 {
 	private $p = array();
 
 	/**
+	 * HTTP status of the last ajax() call (0 = none sent).
+	 *
+	 * @var int
+	 */
+	private $status = 0;
+
+	/**
 	 * Run.
 	 *
 	 * @return bool
@@ -68,6 +75,9 @@ final class NDVR_QA_RR12 {
 			$this->line( 'ABORT: Rosette Reviews with RR-12 must be active.' );
 			return false;
 		}
+		// Buffer everything: in CLI, any output marks the headers as sent and
+		// wp_send_json() would then skip status_header() (checked by R2).
+		ob_start();
 		$this->setup();
 		try {
 			$this->ac1_ac8();
@@ -75,11 +85,13 @@ final class NDVR_QA_RR12 {
 			$this->ac5_ac6();
 			$this->ac7();
 			$this->ac9();
+			$this->review_cases();
 		} catch ( \Throwable $e ) {
 			$this->ok( false, 'uncaught ' . get_class( $e ) . ': ' . $e->getMessage() . ' @ ' . basename( $e->getFile() ) . ':' . $e->getLine() );
 		}
 		$this->teardown();
 		$this->line( sprintf( 'RESULT: %s (%d passed, %d failed)', $this->count['fail'] ? 'FAIL' : 'PASS', $this->count['pass'], $this->count['fail'] ) );
+		ob_end_flush();
 
 		return 0 === $this->count['fail'];
 	}
@@ -193,8 +205,14 @@ final class NDVR_QA_RR12 {
 		$ajax                   = static function () {
 			return true;
 		};
+		$this->status = 0;
+		$status       = function ( $header, $code ) {
+			$this->status = (int) $code;
+			return $header;
+		};
 		add_filter( 'wp_die_ajax_handler', $die );
 		add_filter( 'wp_doing_ajax', $ajax );
+		add_filter( 'status_header', $status, 10, 2 );
 		ob_start();
 		try {
 			call_user_func( $handler );
@@ -204,6 +222,7 @@ final class NDVR_QA_RR12 {
 		$out = (string) ob_get_clean();
 		remove_filter( 'wp_die_ajax_handler', $die );
 		remove_filter( 'wp_doing_ajax', $ajax );
+		remove_filter( 'status_header', $status, 10 );
 		$_POST    = array();
 		$_REQUEST = array();
 		wp_set_current_user( $prev );
@@ -230,10 +249,16 @@ final class NDVR_QA_RR12 {
 	/**
 	 * A landing token for both products.
 	 *
+	 * @param bool $list A list token (source list_link).
 	 * @return string
 	 */
-	private function token() {
+	private function token( $list = false ) {
 		$email = 'rr12-land-' . wp_generate_password( 5, false, false ) . '@example.invalid';
+		if ( $list ) {
+			$row = $this->c()->get( 'token_repository' )->create_list_token( $email, $this->p );
+
+			return is_array( $row ) ? $row['raw'] : (string) $row;
+		}
 		$order = wc_create_order();
 		foreach ( $this->p as $pid ) {
 			$order->add_product( wc_get_product( $pid ), 1 );
@@ -255,7 +280,7 @@ final class NDVR_QA_RR12 {
 	private function ac1_ac8() {
 		$this->min( 30 );
 		$r = $this->create( 'Too short.' );
-		$this->ok( is_wp_error( $r ) && 'ndvr_too_short' === $r->get_error_code() && 'Please write at least 30 characters.' === $r->get_error_message(), 'AC1: create() (onsite, 10 characters) → ndvr_too_short "Please write at least 30 characters."' );
+		$this->ok( is_wp_error( $r ) && 'ndvr_too_short' === $r->get_error_code() && 'Please write at least 30 characters (10 counted).' === $r->get_error_message(), 'AC1: create() (onsite, 10 characters) → ndvr_too_short "Please write at least 30 characters (10 counted)."' );
 		$r = $this->create( 'Too short.', 'list_link' );
 		$this->ok( is_wp_error( $r ) && 'ndvr_too_short' === $r->get_error_code(), 'AC8: list_link with 10 characters → ndvr_too_short' );
 
@@ -273,7 +298,7 @@ final class NDVR_QA_RR12 {
 			\NdvReviews\Forms\ReviewForm::NONCE_ACTION,
 			'ndvr_nonce'
 		);
-		$this->ok( empty( $res['success'] ) && 'Please write at least 30 characters.' === ( $res['data']['message'] ?? '' ) && $this->reviews() === $n, 'AC1: ndvr_submit_review returns the message and stores nothing' );
+		$this->ok( empty( $res['success'] ) && 'Please write at least 30 characters (10 counted).' === ( $res['data']['message'] ?? '' ) && $this->reviews() === $n && 400 === $this->status, 'AC1 / R2: ndvr_submit_review returns the message with HTTP 400 and stores nothing' );
 
 		$res = $this->ajax(
 			array( $this->c()->get( 'testimonial_form' ), 'handle_submit' ),
@@ -288,7 +313,7 @@ final class NDVR_QA_RR12 {
 			\NdvReviews\Forms\TestimonialForm::NONCE,
 			'nonce'
 		);
-		$this->ok( empty( $res['success'] ) && 'Please write at least 30 characters.' === ( $res['data']['message'] ?? '' ) && $this->reviews() === $n, 'AC1: ndvr_testimonial_submit returns the message and stores nothing' );
+		$this->ok( empty( $res['success'] ) && 'Please write at least 30 characters (10 counted).' === ( $res['data']['message'] ?? '' ) && $this->reviews() === $n && 400 === $this->status, 'AC1 / R2: ndvr_testimonial_submit returns the message with HTTP 400 and stores nothing' );
 
 		$res = $this->ajax(
 			array( $this->c()->get( 'landing' ), 'handle_submit' ),
@@ -302,7 +327,7 @@ final class NDVR_QA_RR12 {
 			\NdvReviews\Collection\Landing::NONCE,
 			'nonce'
 		);
-		$this->ok( empty( $res['success'] ) && 'Please write at least 30 characters.' === ( $res['data']['message'] ?? '' ) && $this->reviews() === $n, 'AC1: ndvr_collect_submit returns the message and stores nothing (' . wp_json_encode( $res ) . ')' );
+		$this->ok( empty( $res['success'] ) && 'Please write at least 30 characters (10 counted).' === ( $res['data']['message'] ?? '' ) && $this->reviews() === $n && 400 === $this->status, 'AC1 / R2: ndvr_collect_submit returns the message with HTTP 400 and stores nothing (' . wp_json_encode( $res ) . ')' );
 	}
 
 	/**
@@ -398,8 +423,13 @@ final class NDVR_QA_RR12 {
 			}
 			$counts  = preg_match_all( '/<span class="ndvr-length-count"([^>]*)>/', $html, $cm );
 			$no_live = $counts === $areas && false === strpos( implode( '', $cm[1] ), 'aria-live' );
-			$status  = preg_match_all( '/<span class="ndvr-length-status screen-reader-text" role="status" aria-live="polite"><\/span>/', $html );
-			$this->ok( $ok && $no_live && $status === $areas, "AC7 ({$which}): data attributes, hint id = aria-describedby, counter without aria-live, one empty polite status per textarea ({$areas})" );
+			$status  = preg_match_all( '/<span class="ndvr-length-status screen-reader-text" id="([^"]+)-status" role="status" aria-live="polite"><\/span>/', $html, $sm );
+			preg_match_all( '/aria-describedby="([^"]+)"/', implode( '', $m[0] ), $dm );
+			$paired = $dm[1] === $sm[1] && $counts === preg_match_all( '/<span class="ndvr-length-count" id="(?:' . implode( '|', array_map( 'preg_quote', $dm[1] ) ) . ')-count"/', $html );
+			$this->ok( $ok && $no_live && $status === $areas && $paired, "AC7 ({$which}): data attributes, hint id = aria-describedby, counter without aria-live, one empty polite status per textarea, count/status ids = hint id + -count/-status ({$areas})" );
+			$in_label = preg_match( '/<label\b(?:(?!<\/label>).)*ndvr-length-(?:hint|count|status)/s', $html );
+			$labelled = 'product' === $which || preg_match_all( '/<label for="([^"]+)">[^<]*Your review/', $html, $lm ) === $areas && ! array_diff( $lm[1], array_map( static function ( $t ) { return preg_match( '/ id="([^"]+)"/', $t, $x ) ? $x[1] : ''; }, $m[0] ) );
+			$this->ok( ! $in_label && $labelled, "M3 ({$which}): hint, counter and status are outside every <label>; the review label points at the textarea by id" );
 		}
 	}
 
@@ -417,6 +447,221 @@ final class NDVR_QA_RR12 {
 		$r = $this->create( str_repeat( 'x', 40 ) );
 		remove_filter( 'ndv-reviews/min_review_length', $fifty );
 		$this->ok( is_wp_error( $r ) && false !== strpos( $r->get_error_message(), '50' ) && is_int( $this->create( str_repeat( 'x', 40 ) ) ), 'AC9: the filter returning 50 raises the floor for that request only' );
+	}
+
+	/**
+	 * Code review RR-12 (reviews/code-RR-12.md) harness cases 1–6.
+	 *
+	 * @return void
+	 */
+	private function review_cases() {
+		$this->min( 30 );
+
+		// 1: a too-short review stops all three handlers before any upload.
+		$uploads = 0;
+		$count   = static function ( $file ) use ( &$uploads ) {
+			++$uploads;
+			return $file;
+		};
+		add_filter( 'wp_handle_upload_prefilter', $count );
+		$this->c()->get( 'settings' )->update( array( 'photo_uploads' => true ) );
+		$img = wp_tempnam( 'rr12.png' );
+		file_put_contents( $img, base64_decode( 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=' ) );
+		$this->fx['files'][] = $img;
+		$stage               = static function () use ( $img ) {
+			$_FILES = array(
+				'ndvr_photos' => array(
+					'name'     => array( 'a.png' ),
+					'type'     => array( 'image/png' ),
+					'tmp_name' => array( $img ),
+					'error'    => array( 0 ),
+					'size'     => array( filesize( $img ) ),
+				),
+			);
+		};
+		$base     = array(
+			'product_id'    => (string) $this->p[0],
+			'ndvr_consent'  => '1',
+			'ndvr_criteria' => $this->scores(),
+			'comment'       => 'Too short.',
+		);
+		$messages = array();
+		$stage();
+		$messages[] = $this->ajax( array( $this->c()->get( 'review_form' ), 'handle_submit' ), $base + array( 'author' => 'G', 'email' => 'rr12-u1@example.invalid' ), \NdvReviews\Forms\ReviewForm::NONCE_ACTION, 'ndvr_nonce' );
+		$stage();
+		$messages[] = $this->ajax( array( $this->c()->get( 'testimonial_form' ), 'handle_submit' ), $base + array( 'author' => 'G', 'email' => 'rr12-u2@example.invalid' ), \NdvReviews\Forms\TestimonialForm::NONCE, 'nonce' );
+		$stage();
+		$messages[] = $this->ajax( array( $this->c()->get( 'landing' ), 'handle_submit' ), $base + array( 'token' => $this->token() ), \NdvReviews\Collection\Landing::NONCE, 'nonce' );
+		$_FILES = array();
+		$this->c()->get( 'settings' )->update( array( 'photo_uploads' => false ) );
+		remove_filter( 'wp_handle_upload_prefilter', $count );
+		$all = true;
+		foreach ( $messages as $res ) {
+			$all = $all && 'Please write at least 30 characters (10 counted).' === ( $res['data']['message'] ?? '' );
+		}
+		$this->ok( $all && 0 === $uploads, 'R1: with photos on and a file staged, all three handlers refuse a short review before the upload is touched (' . $uploads . ' uploads)' );
+
+		// 3: list_link reaches the filter from the landing handler and the landing page.
+		$seen   = array();
+		$record = static function ( $min, $data ) use ( &$seen ) {
+			$seen[] = $data;
+			return 'list_link' === $data['source'] ? 45 : $min;
+		};
+		add_filter( 'ndv-reviews/min_review_length', $record, 10, 2 );
+		$list = $this->token( true );
+		$res  = $this->ajax( array( $this->c()->get( 'landing' ), 'handle_submit' ), array_merge( $base, array( 'comment' => str_repeat( 'x', 40 ), 'token' => $list ) ), \NdvReviews\Collection\Landing::NONCE, 'nonce' );
+		$this->ok( empty( $res['success'] ) && false !== strpos( (string) ( $res['data']['message'] ?? '' ), '45' ) && 'list_link' === ( $seen[0]['source'] ?? '' ) && (int) $this->p[0] === (int) ( $seen[0]['product_id'] ?? 0 ), 'R3: a list token\'s submission reaches the filter as list_link with the product id (45 enforced)' );
+		$html = \NdvReviews\Support\View::render( 'magic-landing.php', $this->landing_vars( 'list_link' ) );
+		$this->ok( 1 <= substr_count( $html, 'data-ndvr-min-length="45"' ) && false === strpos( $html, 'data-ndvr-min-length="30"' ), 'R3: the landing template renders list_link\'s minimum (45) when given review_source list_link' );
+		$_GET['ndvr_k'] = $list;
+		$seen           = array();
+		$escape         = static function ( $min, $data ) {
+			if ( 'list_link' === $data['source'] ) {
+				throw new NDVR_QA_12_Die( 'rendered' );
+			}
+			return $min;
+		};
+		add_filter( 'ndv-reviews/min_review_length', $escape, 20, 2 );
+		$rendered = false;
+		ob_start();
+		try {
+			$this->c()->get( 'landing' )->maybe_render();
+		} catch ( NDVR_QA_12_Die $e ) {
+			$rendered = 'rendered' === $e->getMessage();
+		}
+		ob_end_clean();
+		unset( $_GET['ndvr_k'] );
+		remove_filter( 'ndv-reviews/min_review_length', $escape, 20 );
+		remove_filter( 'ndv-reviews/min_review_length', $record, 10 );
+		$this->ok( $rendered, 'R3: Landing::maybe_render() passes review_source list_link for a list token' );
+
+		// 4: the setting saves through the settings page (marker + clamp).
+		$saved = \NdvReviews\Admin\SettingsFields::sanitize_page(
+			'settings',
+			array(
+				\NdvReviews\Admin\SettingsFields::MARKER => array( ReviewLength::SETTING ),
+				ReviewLength::SETTING                   => '-5',
+			)
+		);
+		$high  = \NdvReviews\Admin\SettingsFields::sanitize_page(
+			'settings',
+			array(
+				\NdvReviews\Admin\SettingsFields::MARKER => array( ReviewLength::SETTING ),
+				ReviewLength::SETTING                   => '900',
+			)
+		);
+		$none  = \NdvReviews\Admin\SettingsFields::sanitize_page( 'settings', array( ReviewLength::SETTING => '40' ) );
+		$this->ok( array( ReviewLength::SETTING => 0 ) === $saved && 500 === ( $high[ ReviewLength::SETTING ] ?? null ) && ! array_key_exists( ReviewLength::SETTING, $none ), 'R4: settings save: -5 → 0, 900 → 500, and the key is untouched when the page didn\'t render it' );
+
+		// 5: per-product filter — the product form shows what the server enforces.
+		$per = function ( $min, $data ) {
+			return (int) $this->p[1] === (int) $data['product_id'] ? 60 : $min;
+		};
+		add_filter( 'ndv-reviews/min_review_length', $per, 10, 2 );
+		$GLOBALS['post'] = get_post( $this->p[1] ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- render context.
+		setup_postdata( $GLOBALS['post'] );
+		$html = $this->form( 'product' );
+		wp_reset_postdata();
+		$res = $this->ajax(
+			array( $this->c()->get( 'review_form' ), 'handle_submit' ),
+			array(
+				'product_id'    => (string) $this->p[1],
+				'ndvr_consent'  => '1',
+				'ndvr_criteria' => $this->scores(),
+				'comment'       => str_repeat( 'y', 50 ),
+				'author'        => 'G',
+				'email'         => 'rr12-pp@example.invalid',
+			),
+			\NdvReviews\Forms\ReviewForm::NONCE_ACTION,
+			'ndvr_nonce'
+		);
+		$short = $this->create( str_repeat( 'y', 50 ) );
+		remove_filter( 'ndv-reviews/min_review_length', $per, 10 );
+		$this->ok( false !== strpos( $html, 'data-ndvr-min-length="60"' ) && false !== strpos( (string) ( $res['data']['message'] ?? '' ), '60' ) && is_int( $short ), 'R5: a per-product filter (60 on one product) is the minimum the product form shows and the server enforces; the other product keeps 30' );
+		$this->ok( 1 === preg_match( '/aria-describedby="(ndvr-length-[^"]+)"/', $html ) && false === strpos( $html, 'id="ndvr-length-hint"' ), 'm6: the product form\'s hint id is unique (wp_unique_id)' );
+
+		// 6: "<" — a lone one is text (core's wp_pre_kses_less_than escapes it);
+		// a "<…>" span is removed; the forms' scripts count alike.
+		$heart = 'I love it <3 and will buy again';
+		$span  = 'Great <3 really > ok';
+		$r     = $this->create( $span );
+		$this->ok( 31 === ReviewLength::count( wp_kses_post( $heart ) ) && 8 === ReviewLength::count( wp_kses_post( $span ) ) && is_wp_error( $r ) && false !== strpos( $r->get_error_message(), '(8 counted)' ), 'R6: a lone "<3" counts in full (31); "<3 really >" is removed (8) and the message says what was counted' );
+		$this->js_parity();
+		$this->ok( 14 === ReviewLength::count( wp_kses_post( 'Fish &amp; chips &hellip;' ) ) && 3 === ReviewLength::count( wp_kses_post( 'a<!-- note -->bc' ) ), 'R6: entities decode to one character each; comments are not counted' );
+		$this->ok( 2 === ReviewLength::count( 'ok' . str_repeat( "\u{200B}", 28 ) ) && 3 === ReviewLength::count( "a\u{85}\u{85}b" ) && 4 === ReviewLength::count( "\u{FEFF}good\u{FEFF}" ) && 3 === ReviewLength::count( "\u{200C}x\u{200D}" ) && 0 < ReviewLength::count( "long enough \xC3\x28 text" ), 'm1/m2/m9: zero-width padding doesn\'t count, NEL and BOM are whitespace, ZWNJ/ZWJ count, invalid UTF-8 doesn\'t zero the count' );
+		$this->ok( 0 === ReviewLength::sanitize( '-5' ) && 0 === ReviewLength::sanitize( array( 3 ) ) && 12 === ReviewLength::sanitize( '12.9' ), 'm8: sanitize clamps negatives to 0 (not absint\'s 5) and ignores arrays' );
+	}
+
+	/**
+	 * R6: the shipped length() of reviews.js and collect.js, run in node, agrees
+	 * with the server on "<" edge cases (skipped when node isn't on PATH).
+	 *
+	 * @return void
+	 */
+	private function js_parity() {
+		$cases = array( 'I <3 this a lot', 'I <3 this > that', 'cost <$20 ok', 'go <- here', 'a <b c d', 'a <b> c', 'a < b', 'x<y z', 'a<!-- c -->b', 'a<!-- c > d -->b', 'a<!-- open', 'a </ b', 'a <1b> c', 'a <!x c', 'a <b c>d e', 'a <x <y> z', 'a > b', '<<< wow >>>', 'one <two <three', 'p <script>alert(1)</script> q', "multi\n<line\nbreak> end", 'x<y>z<w', 'Fish &amp; chips', "\u{1F600} <3 \u{597D}", "a\u{85}\u{85}b", "a\u{180E}\u{180E}b", "\u{FEFF}good\u{FEFF}", 'ok' . str_repeat( "\u{200B}", 28 ), "soft\u{AD}ware\u{2060}", "\u{200C}x\u{200D}y", "a\u{3000}\u{3000}\u{A0}b\u{2028}c" );
+		$server = array();
+		foreach ( $cases as $c ) {
+			$server[] = ReviewLength::count( wp_kses_post( trim( $c ) ) );
+		}
+		foreach ( array( 'reviews.js', 'collect.js' ) as $js ) {
+			$src = (string) file_get_contents( plugin_dir_path( NDVR_FILE ) . 'assets/js/' . $js );
+			if ( ! preg_match( '/\n(\t*)(\/\/ Count the way the server does.*?\n\1function length\(\) \{\n.*?\n\1\}\n)/s', $src, $m ) ) {
+				$this->ok( false, "R6 ({$js}): length() not found" );
+				continue;
+			}
+			// A stand-in for the <textarea> decoder: the cases use only &amp;.
+			$prog = 'var document={createElement:function(){return {set innerHTML(v){this.v=v.replace(/&amp;/g,"&")},get value(){return this.v}};}};'
+				. 'var cases=JSON.parse(require("fs").readFileSync(0,"utf8"));'
+				. 'console.log(JSON.stringify(cases.map(function(v){var area={value:v};' . $m[2] . 'return length();})));';
+			$tmp  = wp_tempnam( 'rr12.js' );
+			file_put_contents( $tmp, $prog );
+			$this->fx['files'][] = $tmp;
+			$pipes               = array();
+			$proc                = proc_open( array( 'node', $tmp ), array( array( 'pipe', 'r' ), array( 'pipe', 'w' ), array( 'pipe', 'w' ) ), $pipes );
+			if ( ! is_resource( $proc ) ) {
+				$this->line( "SKIP: R6 ({$js}) node not available" );
+				continue;
+			}
+			fwrite( $pipes[0], wp_json_encode( $cases ) );
+			fclose( $pipes[0] );
+			$out = stream_get_contents( $pipes[1] );
+			$err = stream_get_contents( $pipes[2] );
+			fclose( $pipes[1] );
+			fclose( $pipes[2] );
+			proc_close( $proc );
+			$got  = json_decode( trim( (string) $out ), true );
+			$diff = array();
+			foreach ( $cases as $i => $c ) {
+				if ( ! is_array( $got ) || ( $got[ $i ] ?? null ) !== $server[ $i ] ) {
+					$diff[] = wp_json_encode( $c ) . ' server ' . $server[ $i ] . ' js ' . ( is_array( $got ) ? ( $got[ $i ] ?? '?' ) : '?' );
+				}
+			}
+			$this->ok( ! $diff, "R6 ({$js}): the shipped counter agrees with the server on " . count( $cases ) . ' "<" / entity / emoji / whitespace / zero-width cases' . ( $diff ? ': ' . implode( '; ', array_slice( $diff, 0, 4 ) ) . ' ' . trim( (string) $err ) : '' ) );
+		}
+	}
+
+	/**
+	 * Landing template variables.
+	 *
+	 * @param string $source review_source.
+	 * @return array<string,mixed>
+	 */
+	private function landing_vars( $source = 'magic_link' ) {
+		return array(
+			'valid'          => true,
+			'token'          => 'x',
+			'products'       => $this->p,
+			'criteria'       => $this->c()->get( 'criteria' )->get_active(),
+			'settings'       => $this->c()->get( 'settings' ),
+			'nonce'          => 'n',
+			'ajax_url'       => admin_url( 'admin-ajax.php' ),
+			'ajax_action'    => \NdvReviews\Collection\Landing::AJAX_ACTION,
+			'default_author' => '',
+			'is_test'        => false,
+			'review_fields'  => array(),
+			'review_source'  => $source,
+		);
 	}
 
 	/**

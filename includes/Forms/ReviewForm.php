@@ -449,9 +449,17 @@ class ReviewForm implements Registerable {
 
 			<p class="ndvr-field ndvr-field-comment comment-form-comment">
 				<label for="comment"><?php esc_html_e( 'Your review', 'rosette-reviews' ); ?>&nbsp;<span class="required">*</span></label>
-				<?php $ndvr_min = \NdvReviews\Reviews\ReviewLength::min( array( 'source' => 'onsite' ) ); ?>
-				<textarea id="comment" name="comment" cols="45" rows="6" required<?php echo \NdvReviews\Reviews\ReviewLength::textarea_attrs( 'ndvr-length-hint', $ndvr_min ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped by the helper. ?>></textarea>
-				<?php echo \NdvReviews\Reviews\ReviewLength::after_textarea( 'ndvr-length-hint', $ndvr_min ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped by the helper. ?>
+				<?php
+				$ndvr_min  = \NdvReviews\Reviews\ReviewLength::min(
+					array(
+						'source'     => 'onsite',
+						'product_id' => (int) get_the_ID(),
+					)
+				);
+				$ndvr_hint = wp_unique_id( 'ndvr-length-' );
+				?>
+				<textarea id="comment" name="comment" cols="45" rows="6" required<?php echo \NdvReviews\Reviews\ReviewLength::textarea_attrs( $ndvr_hint, $ndvr_min ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped by the helper. ?>></textarea>
+				<?php echo \NdvReviews\Reviews\ReviewLength::after_textarea( $ndvr_hint, $ndvr_min ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped by the helper. ?>
 			</p>
 
 			<?php echo FieldRenderer::render( \NdvReviews\Plugin::instance()->container()->get( 'review_fields' )->get_active(), wp_unique_id( 'ndvr-q' ) . '-' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped by the renderer. ?>

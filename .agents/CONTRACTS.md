@@ -260,6 +260,10 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   handlers. Markup: textarea `aria-describedby`, `data-ndvr-min-length`, `data-ndvr-count-format`,
   `data-ndvr-status-reached`, `data-ndvr-status-format`; `.ndvr-length-hint`, `.ndvr-length-count` (no live region),
   `.ndvr-length-status.screen-reader-text` (role status, polite). Counter code in `reviews.js` and `collect.js`.
+- RR-12 rev 4: the filter's `$data` always has `source` and `product_id` (0 when unknown), at render, in the early check
+  and in `create()`. Count ids `{hint}-count` / `{hint}-status` (found via the textarea's `aria-describedby`), outside the
+  label. Template var `review_source` (magic-landing.php: `magic_link`|`list_link`). `ReviewLength::SPACE` (whitespace
+  set); U+200B/U+2060/U+00AD don't count. `ndvr_too_short` message: "… at least %1$s characters (%2$s counted)."
 
 ## Captcha providers (RR-13, no API change)
 - Settings `captcha_provider` (none|recaptcha|turnstile|hcaptcha; no default stored), `turnstile_site_key`,

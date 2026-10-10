@@ -1,11 +1,25 @@
 # RR-12: Minimum review length
 
-Status: built, in review (rev 3) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · No Pro-facing API, so no `NDVR_API` change
+Status: done (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · No Pro-facing API, so no `NDVR_API` change
 
 Review findings applied: round 2 RR-12 items 1 (live region) and 2 (`list_link`).
 
+Rev 4 (code review `reviews/code-RR-12.md`, 0 blockers, 3 majors, 9 minors):
+- **M1, counting `<`:** the review assumed kses deletes everything from a `<`. In a booted WordPress that's only half true. Core's default `pre_kses` filter `wp_pre_kses_less_than` escapes a lone `<` that has no `>` after it, so `I <3 this` is stored and counted in full. A `<…>` span that is closed by a `>` is removed (`Great <3 really > ok` → `Great ok`). The JS now follows the same two rules: complete comments are removed, `<[^>]*?(?=<|>|$)` is removed only when it ends in `>`, and entities are decoded through a detached `<textarea>`. The harness runs the shipped `length()` of both scripts in node against `ReviewLength::count( wp_kses_post() )` on 31 cases and they agree. The server message now says what was counted: "Please write at least 30 characters (8 counted)." Logged: RR-12-f1 (a `<…>` span in review text is lost on save; this is existing core behaviour, not RR-12's).
+- **M2, filter `$data`:** `min()` always passes `source` and `product_id` (0 when unknown) to `ndv-reviews/min_review_length`. That holds at render time, in the early check and in `create()`. The product form passes `get_the_ID()`. The landing page gets a `review_source` template var (`list_link` for list tokens, else `magic_link`). Only those two keys are guaranteed; `create()` adds the rest of the submission.
+- **M3, label:** on the standalone form and the landing page the label is now `<label for>` and closes before the textarea. The hint, counter and status follow the textarea outside any label, so the field's name is just "Your review *". The count and status carry ids `{hint}-count` and `{hint}-status`, and the scripts find them through the textarea's `aria-describedby` (that also fixes m7).
+- **m1:** one explicit whitespace set on both sides (`ReviewLength::SPACE`; the same class literal in the scripts) instead of `\s`, which differs between PCRE and JS on NEL, U+180E and the BOM.
+- **m2 (decision):** invisible padding (U+200B zero-width space, U+2060 word joiner, U+00AD soft hyphen) is dropped before counting, so 28 zero-width spaces don't meet a minimum. ZWJ and ZWNJ still count: Persian and Indic scripts need them, and dropping ZWJ would change emoji counts. The "code points" rule otherwise stands.
+- **m3:** the counter skips `input` while an IME is composing and updates on `compositionend`.
+- **m4:** a form `reset` (reviews.js after success) clears the counter, the status, the latch and the timer.
+- **m5:** "Minimum length reached." is announced each time the count reaches the minimum from below; `last` still stops the same words twice in a row. A restored or pre-filled value is counted at init and on `pageshow`, without an announcement. §4 is reworded to match.
+- **m6:** the product form's hint id comes from `wp_unique_id( 'ndvr-length-' )`.
+- **m8:** sanitize is `min( 500, max( 0, (int) $raw ) )`, so -5 saves as 0 (`absint` made it 5).
+- **m9:** invalid UTF-8 is stripped (`wp_check_invalid_utf8( …, true )`) instead of zeroing the count. `ENT_QUOTES | ENT_HTML5` decodes `&apos;`. The translator comments say to keep `%1$d` and `%2$d`. The ASCII counter digits and the early check's message on an empty review are left as they are.
+- **Harness:** gaps 1–6 are closed. That covers the upload pre-check through the upload prefilter (all three handlers), HTTP 400 (output is buffered so `status_header` fires), `list_link` through the landing handler and through `Landing::maybe_render()`, the settings save through `SettingsFields::sanitize_page()`, parity with a per-product filter, and the `<` cases and JS parity.
+
 Build notes (2026-10-10):
-- **Hint element:** the hint is a `<span class="ndvr-length-hint">` (styled as a block), not a `<p>`. On the standalone form and the landing page the textarea sits inside a `<label>`, where a `<p>` isn't allowed. The hint, the counter and the status follow the textarea in the same parent.
+- **Hint element:** the hint is a `<span class="ndvr-length-hint">` (styled as a block), not a `<p>`. The hint, the counter and the status follow the textarea in the same parent, outside the label (rev 4).
 - **Code location:** the logic lives in `Reviews\ReviewLength` (setting, `min()`, `count()`, `check()`, markup helpers). `ReviewRepository::content_length()` and `check_length()` are the contract's static entry points and delegate to it.
 - **Early check:** the three AJAX handlers also run the check before any upload, so a short review never stores an attachment. `create()` repeats it.
 
@@ -26,7 +40,7 @@ Non-goals: a maximum length (existing limits stay), a word count, the title fiel
   - under the textarea, a hint `<p class="ndvr-length-hint" id="…">At least 30 characters.</p>`, referenced by the textarea's `aria-describedby`;
   - a visible counter `<span class="ndvr-length-count" aria-hidden="true">12 / 30</span>`, empty until typing starts. It has **no** live region, so screen readers aren't interrupted on every keystroke;
   - a separate polite region `<span class="ndvr-length-status screen-reader-text" role="status" aria-live="polite"></span>`, empty at first. The script writes to it only:
-    - once, when the count first reaches the minimum: "Minimum length reached.";
+    - when the count reaches the minimum (again after it drops below, rev 4): "Minimum length reached.";
     - on blur of the textarea while below the minimum: "12 of 30 characters." (`%1$d of %2$d characters.`);
     - debounced by 1 second, and only when the text would change, so repeated blurs or crossings back and forth don't repeat it;
   - on submit below the minimum, the server error "Please write at least 30 characters." in the form's existing message region (`.ndvr-form-message`, role status).
@@ -57,7 +71,7 @@ Pro (paired tasks, Pro never edited by free):
 - Pro `Moderation\Plus::validate()` (Plus.php:84-99) runs on `validate_review` after our check; no interaction.
 
 ## 6. Contract delta
-- **Settings key** `min_review_length` (int, default 0, sanitize `absint` then clamp 0 to 500; card "Reviews and trust").
+- **Settings key** `min_review_length` (int, default 0, sanitize `(int)` then clamp 0 to 500; card "Reviews and trust").
 - **Filter** `ndv-reviews/min_review_length` (int `$min`, array `$data`), so a store can vary it per product.
 - **Helper** `ReviewRepository::content_length( string $html ): int` (public static, see Measurement below) and `ReviewRepository::check_length( string $content, array $data ): true|WP_Error`.
 - **Error code** `ndvr_too_short`.
@@ -67,11 +81,12 @@ Pro (paired tasks, Pro never edited by free):
 ### Measurement (server authoritative)
 `content_length()` runs on the kses'd content:
 1. `wp_strip_all_tags()`;
-2. `html_entity_decode( …, ENT_QUOTES, 'UTF-8' )`, so `&amp;` counts as one character;
-3. collapse runs of whitespace (`preg_replace( '/\s+/u', ' ', … )`) and `trim()`, so padding with spaces doesn't count;
-4. `mb_strlen( …, 'UTF-8' )`, counting Unicode code points.
+2. `html_entity_decode( …, ENT_QUOTES | ENT_HTML5, 'UTF-8' )`, so `&amp;` counts as one character, then `wp_check_invalid_utf8( …, true )`;
+3. drop invisible padding (U+200B, U+2060, U+00AD; rev 4 m2);
+4. collapse runs of whitespace from one explicit set (`ReviewLength::SPACE`) and `trim()`, so padding with spaces doesn't count;
+5. `mb_strlen( …, 'UTF-8' )`, counting Unicode code points.
 
-The JS mirrors it: `Array.from( text.replace( /\s+/g, ' ' ).trim() ).length`. That also counts code points, so an emoji counts once in both. A joined emoji sequence (family, flag) counts as several code points in both. The two can differ only on rare whitespace characters; the server decides.
+The JS mirrors it on the raw textarea value. It removes complete comments and every `<…>` span closed by a `>`, keeps a lone `<` (core's `wp_pre_kses_less_than` escapes it, so it is stored as text), decodes entities, and applies steps 3–5 with the same character sets. An emoji counts once in both. A joined emoji sequence (family, flag) counts as several code points in both. The harness checks the shipped scripts against the server on 31 cases (rev 4). Where they still differ (an unusual kses rule, a filter on `pre_kses`), the server decides, and its message says what it counted.
 
 The check applies when `Sources::is_interactive( $data['source'] )`. It runs in `create()` right after the empty-content check (ReviewRepository.php:91-94), before ratings and before any insert.
 
@@ -80,7 +95,7 @@ One settings key, registered through F6 (default 0), so old sites behave as befo
 
 ## 8. Security
 - No new entry point. The check runs inside the existing nonce'd handlers via `create()`.
-- The setting saves through the F6 handler (nonce, `Caps::manage()`, `absint`, clamp).
+- The setting saves through the F6 handler (nonce, `Caps::manage()`, `(int)`, clamp 0–500).
 - The hint and counter strings are `esc_html`'d; the data attributes are `esc_attr`'d integers and a translated format string.
 
 ## 9. Privacy

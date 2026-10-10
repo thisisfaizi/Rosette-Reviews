@@ -198,6 +198,7 @@ class Landing implements Registerable {
 					'default_author' => $row ? $this->default_author( $row, $request ) : '',
 					'is_test'        => $row && 'test' === $row->type,
 					'review_fields'  => \NdvReviews\Plugin::instance()->container()->get( 'review_fields' )->get_active(),
+					'review_source'  => $row && 'list' === $row->type ? 'list_link' : 'magic_link',
 				)
 			);
 			$this->output_page( $html );

@@ -844,3 +844,13 @@ all suites green; debug.log empty; phpcs clean on new code. Manual browser check
   deleted questions answers, m5 slug cap + CSV column shown, m6 import notes shown, m7 cache expiry/no failed cache/
   uninstall key, m8 unique ids, m9 decoded storage, m11 doc, m13 nits. m12 → TASKS RR-11-f1.
 EVIDENCE: rr-11 51/51 (17 new checks); all suites green; debug.log empty; phpcs clean (no new sniffs vs HEAD).
+
+## 2026-10-10 — RR-12 code review fixed → done
+- Review `.agents/prd/reviews/code-RR-12.md`: 0 blockers, 3 majors, 9 minors; decisions in PRD RR-12 rev 4.
+  M1: the premise was half right. A booted WP escapes a lone "<" (core pre_kses filter wp_pre_kses_less_than), so only
+  "<…>" spans are lost; the JS follows both rules, and the server message shows the count. M2: render passes source +
+  product_id (product form get_the_ID, landing review_source). M3: hint/count/status outside the label, found by id.
+  m1 explicit whitespace set; m2 zero-width padding dropped (ZWJ/ZWNJ kept); m3 IME; m4 reset; m5 re-arm + prefilled
+  count; m6 unique hint id; m8 clamp; m9 invalid UTF-8, ENT_HTML5, translator notes. Follow-up RR-12-f1 in TASKS.
+EVIDENCE: rr-12 32/32 (16 new checks, including the shipped length() of both scripts run in node vs the server on 31
+cases); all suites green; debug.log empty; phpcs clean on the changed files.

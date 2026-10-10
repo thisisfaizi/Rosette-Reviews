@@ -17,6 +17,7 @@
  * @var string                $default_author Name shown with the review unless changed.
  * @var bool                  $is_test     Admin test link (submissions are refused).
  * @var array                 $review_fields Active review questions (RR-11).
+ * @var string                $review_source magic_link|list_link (RR-12 minimum length).
  *
  * @package NdvReviews
  */
@@ -103,18 +104,17 @@ endif;
 				</p>
 
 				<p class="ndvr-field">
-					<label><?php esc_html_e( 'Your review', 'rosette-reviews' ); ?> <span class="required">*</span>
+					<label for="<?php echo esc_attr( 'p' . (int) $ndvr_pid . '-comment' ); ?>"><?php esc_html_e( 'Your review', 'rosette-reviews' ); ?> <span class="required">*</span></label>
 						<?php
 						$ndvr_min = \NdvReviews\Reviews\ReviewLength::min(
 							array(
-								'source'     => 'magic_link',
+								'source'     => isset( $review_source ) ? (string) $review_source : 'magic_link',
 								'product_id' => (int) $ndvr_pid,
 							)
 						);
 						?>
-						<textarea name="comment" rows="5" required<?php echo \NdvReviews\Reviews\ReviewLength::textarea_attrs( 'p' . (int) $ndvr_pid . '-length', $ndvr_min ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped by the helper. ?>></textarea>
+						<textarea id="<?php echo esc_attr( 'p' . (int) $ndvr_pid . '-comment' ); ?>" name="comment" rows="5" required<?php echo \NdvReviews\Reviews\ReviewLength::textarea_attrs( 'p' . (int) $ndvr_pid . '-length', $ndvr_min ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped by the helper. ?>></textarea>
 						<?php echo \NdvReviews\Reviews\ReviewLength::after_textarea( 'p' . (int) $ndvr_pid . '-length', $ndvr_min ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped by the helper. ?>
-					</label>
 				</p>
 
 				<?php

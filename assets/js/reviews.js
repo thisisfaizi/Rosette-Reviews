@@ -107,9 +107,9 @@
 			return;
 		}
 		var min    = parseInt( area.getAttribute( 'data-ndvr-min-length' ) || '0', 10 );
-		var box    = area.parentNode;
-		var count  = box ? box.querySelector( '.ndvr-length-count' ) : null;
-		var status = box ? box.querySelector( '.ndvr-length-status' ) : null;
+		var hintId = area.getAttribute( 'aria-describedby' ) || '';
+		var count  = hintId ? document.getElementById( hintId + '-count' ) : null;
+		var status = hintId ? document.getElementById( hintId + '-status' ) : null;
 		if ( ! min || ! count || ! status ) {
 			return;
 		}
@@ -119,8 +119,20 @@
 		var reached     = false;
 		var last        = '';
 		var timer       = null;
+		// Count the way the server does (ReviewLength::count()): comments and
+		// any "<…>" span are removed (kses), a lone "<" with no ">" after it
+		// stays as text (core's wp_pre_kses_less_than), entities are decoded,
+		// invisible padding (zero-width space, word joiner, soft hyphen) is
+		// dropped, whitespace runs collapse to one space, code points count.
+		var space   = /[\t\n\v\f\r \u0085\u00A0\u1680\u180E\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+/g;
+		var hidden  = /[\u200B\u2060\u00AD]/g;
+		var decoder = document.createElement( 'textarea' );
 		function length() {
-			return Array.from( area.value.replace( /\s+/g, ' ' ).trim() ).length;
+			var text = area.value.replace( /<!--[\s\S]*?-->/g, '' ).replace( /<[^>]*?(?:(?=<)|>|$)/g, function ( m ) {
+				return '>' === m.slice( -1 ) ? '' : m;
+			} );
+			decoder.innerHTML = text;
+			return Array.from( decoder.value.replace( hidden, '' ).replace( space, ' ' ).trim() ).length;
 		}
 		function fill( format, n ) {
 			return format.replace( '%1$d', String( n ) ).replace( '%2$d', String( min ) );
@@ -134,19 +146,51 @@
 				}
 			}, 1000 );
 		}
-		area.addEventListener( 'input', function () {
+		function update( announce ) {
 			var n             = length();
 			count.textContent = area.value ? fill( countFormat, n ) : '';
-			if ( n >= min && ! reached ) {
+			if ( n < min ) {
+				// Below again: the next crossing is announced (`last` still stops
+				// the same words twice in a row).
+				reached = false;
+			} else if ( ! reached ) {
 				reached = true;
-				say( reachedText );
+				if ( announce ) {
+					say( reachedText );
+				}
 			}
+		}
+		area.addEventListener( 'input', function ( e ) {
+			// IME: count the converted text, not the romaji/pinyin being composed.
+			if ( e.isComposing ) {
+				return;
+			}
+			update( true );
+		} );
+		area.addEventListener( 'compositionend', function () {
+			update( true );
 		} );
 		area.addEventListener( 'blur', function () {
 			var n = length();
 			if ( n < min ) {
 				say( fill( belowFormat, n ) );
 			}
+		} );
+		// A reset form (after a successful submit) starts over.
+		if ( area.form ) {
+			area.form.addEventListener( 'reset', function () {
+				clearTimeout( timer );
+				reached            = false;
+				last               = '';
+				count.textContent  = '';
+				status.textContent = '';
+			} );
+		}
+		// Text the browser restored (back/forward, form restore) or a pre-filled
+		// value is counted without an announcement.
+		update( false );
+		window.addEventListener( 'pageshow', function () {
+			update( false );
 		} );
 	}
 	lengthCounter( form.querySelector( 'textarea[data-ndvr-min-length]' ) );
