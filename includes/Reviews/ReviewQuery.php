@@ -18,6 +18,19 @@ defined( 'ABSPATH' ) || exit;
 class ReviewQuery {
 
 	/**
+	 * Shortest search query (RR-16).
+	 */
+	const SEARCH_MIN = 2;
+
+	/**
+	 * Whether the last search found more matches than it returned.
+	 *
+	 * @var bool
+	 */
+	private $search_truncated = false;
+
+
+	/**
 	 * Paginate reviews for a product with filters and sorting.
 	 *
 	 * @param array<string,mixed> $args {
@@ -57,6 +70,8 @@ class ReviewQuery {
 		$product_id = absint( $args['product_id'] );
 		$per_page   = max( 1, min( 50, (int) $args['per_page'] ) );
 		$page       = max( 1, (int) $args['page'] );
+		// RR-16: known before any early return, so every result carries it (M2).
+		$search = $product_id ? self::normalize_search( $args['search'] ) : '';
 
 		// Reviews live on the product's pool (RR-00b E4); visibility is still
 		// checked on the product that was asked for. Reviews still stored on the
@@ -81,7 +96,7 @@ class ReviewQuery {
 		// reviews on drafts, private or password-protected posts must not leak.
 		if ( $product_id ) {
 			if ( ! $this->is_viewable( $product_id ) ) {
-				return $this->empty_result( $page );
+				return $this->empty_result( $page, $search );
 			}
 			if ( count( $review_posts ) > 1 ) {
 				$query_args['post__in'] = $review_posts;
@@ -99,7 +114,7 @@ class ReviewQuery {
 		if ( ! $product_id && ! empty( $args['category'] ) ) {
 			$cat_product_ids = $this->product_ids_for_category( $args['category'] );
 			if ( empty( $cat_product_ids ) ) {
-				return $this->empty_result( $page );
+				return $this->empty_result( $page, $search );
 			}
 			$query_args['post__in'] = $cat_product_ids;
 		}
@@ -108,7 +123,7 @@ class ReviewQuery {
 		if ( ! empty( $args['tag'] ) ) {
 			$ids = ReviewTags::comment_ids_for_tag( $product_id, sanitize_title( $args['tag'] ) );
 			if ( empty( $ids ) ) {
-				return $this->empty_result( $page );
+				return $this->empty_result( $page, $search );
 			}
 			$query_args['comment__in'] = $ids;
 		}
@@ -116,14 +131,13 @@ class ReviewQuery {
 		// Text search (RR-16): one product only, resolved to an id list like the
 		// tag and photo filters, so cached results never mix (never the
 		// WP_Comment_Query `search` arg, which also matches emails and IPs).
-		$search = $product_id ? self::normalize_search( $args['search'] ) : '';
 		if ( '' !== $search ) {
 			$ids = $this->search_ids( $product_id, $search );
 			if ( isset( $query_args['comment__in'] ) ) {
 				$ids = array_values( array_intersect( $query_args['comment__in'], $ids ) );
 			}
 			if ( empty( $ids ) ) {
-				return $this->empty_result( $page ) + array( 'search' => $search );
+				return $this->empty_result( $page, $search );
 			}
 			$query_args['comment__in'] = $ids;
 		}
@@ -186,7 +200,7 @@ class ReviewQuery {
 			// An empty comment__in means "no restriction" to WP_Comment_Query, so
 			// an empty intersection has to end the query here.
 			if ( empty( $ids ) ) {
-				return $this->empty_result( $page );
+				return $this->empty_result( $page, $search );
 			}
 			$query_args['comment__in'] = $ids;
 		}
@@ -265,78 +279,156 @@ class ReviewQuery {
 		$items = apply_filters( 'ndv-reviews/review_items', $items, $args );
 
 		return array(
-			'items'  => $items,
-			'total'  => $total,
-			'pages'  => (int) ceil( $total / $per_page ),
-			'page'   => $page,
-			'search' => $search,
+			'items'     => $items,
+			'total'     => $total,
+			'pages'     => (int) ceil( $total / $per_page ),
+			'page'      => $page,
+			'search'    => $search,
+			// More matches exist than search_max_ids (M3): totals and sorts cover the newest ones.
+			'truncated' => '' !== $search && $this->search_truncated,
 		);
 	}
 
 	/**
-	 * A search query as it is used (RR-16): sanitised, trimmed, 2 to 80
-	 * characters, else ''.
+	 * A search query as it is used (RR-16): plain text (no HTML sanitising,
+	 * so "<" and "100%" stay as typed), control characters and runs of
+	 * spaces collapsed, trimmed; 2 to 80 characters, else ''. Every output
+	 * escapes it.
 	 *
 	 * @param mixed $raw Raw query (already unslashed).
 	 * @return string
 	 */
 	public static function normalize_search( $raw ) {
-		$q   = is_scalar( $raw ) ? trim( sanitize_text_field( (string) $raw ) ) : '';
+		if ( ! is_scalar( $raw ) ) {
+			return '';
+		}
+		$q   = wp_check_invalid_utf8( (string) $raw, true );
+		$q   = trim( (string) preg_replace( '/[\x00-\x1F\x7F\s]+/u', ' ', $q ) );
 		$len = mb_strlen( $q, 'UTF-8' );
 
-		return $len >= 2 && $len <= 80 ? $q : '';
+		return $len >= self::SEARCH_MIN && $len <= 80 ? $q : '';
 	}
 
 	/**
-	 * Ids of a product's published reviews whose text or title contains the
-	 * query (case-insensitive; NDVR_API 10). Only the review text and the
-	 * title are searched, never the author, email, URL or IP.
+	 * Ids of a product's published, top-level reviews whose text or title
+	 * contains the query (case-insensitive, as written: accents count;
+	 * NDVR_API 10). Only the review text and the title are searched, never the
+	 * author, email, URL or IP.
+	 *
+	 * Rows are fetched in batches and confirmed on the visible text, so
+	 * rejected candidates don't use up `ndv-reviews/search_max_ids` (1000).
+	 * When more confirmed matches exist, `search_truncated` is set. Results
+	 * are cached for 5 minutes per product and query.
 	 *
 	 * @param int    $product_id Product (its pool is searched too).
-	 * @param string $q          Normalised query.
-	 * @return int[] Newest first, at most `ndv-reviews/search_max_ids` (1000).
+	 * @param string $q          Query.
+	 * @return int[] Newest first.
 	 */
 	public function search_ids( $product_id, $q ) {
 		global $wpdb;
 
-		$product_id = absint( $product_id );
-		$q          = self::normalize_search( $q );
+		$this->search_truncated = false;
+		$product_id             = absint( $product_id );
+		$q                      = self::normalize_search( $q );
 		if ( ! $product_id || '' === $q ) {
 			return array();
 		}
 		$posts = array_values( array_unique( array( $product_id, Pool::resolve_id( $product_id ) ) ) );
 
 		/**
-		 * Filter the most reviews one search considers.
+		 * Filter the most matches one search returns.
 		 *
 		 * @param int $max Default 1000.
 		 */
 		$max = max( 1, (int) apply_filters( 'ndv-reviews/search_max_ids', 1000 ) );
-		// Stored text is kses'd ("&" is "&amp;"), so both spellings are tried; the
-		// match is confirmed on the visible text below.
-		$raw = '%' . $wpdb->esc_like( $q ) . '%';
-		$enc = '%' . $wpdb->esc_like( esc_html( $q ) ) . '%';
-		$in  = implode( ',', array_fill( 0, count( $posts ), '%d' ) );
-		$sql = "SELECT c.comment_ID, c.comment_content, t.meta_value AS title
-			FROM {$wpdb->comments} c
-			LEFT JOIN {$wpdb->commentmeta} t ON t.comment_id = c.comment_ID AND t.meta_key = '_ndvr_title'
-			WHERE c.comment_post_ID IN ({$in}) AND c.comment_approved = '1' AND c.comment_parent = 0 AND c.comment_type IN ('review','comment')
-				AND ( c.comment_content LIKE %s OR c.comment_content LIKE %s OR t.meta_value LIKE %s )
-			ORDER BY c.comment_date_gmt DESC
-			LIMIT %d";
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- placeholders built above.
-		$rows = (array) $wpdb->get_results( $wpdb->prepare( $sql, array_merge( $posts, array( $raw, $enc, $raw, $max ) ) ) );
+		$key = self::search_key( $product_id, $q );
+		$hit = get_transient( $key );
+		if ( is_array( $hit ) && isset( $hit['ids'] ) ) {
+			$this->search_truncated = ! empty( $hit['truncated'] );
 
-		$ids = array();
-		foreach ( $rows as $row ) {
-			// Visible text only: a match inside a tag name or attribute doesn't count.
-			$text = html_entity_decode( wp_strip_all_tags( (string) $row->comment_content ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) . "\n" . html_entity_decode( (string) $row->title, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
-			if ( false !== mb_stripos( $text, $q, 0, 'UTF-8' ) ) {
-				$ids[] = (int) $row->comment_ID;
-			}
+			return array_map( 'intval', (array) $hit['ids'] );
 		}
 
+		// Stored text is kses'd ("&" is "&amp;", "’" may be "&#8217;"): the
+		// literal query, and its words joined by "%", select candidates; the
+		// visible-text check below decides.
+		$words = preg_split( '/[^\p{L}\p{N}]+/u', $q, -1, PREG_SPLIT_NO_EMPTY );
+		$lit   = '%' . $wpdb->esc_like( $q ) . '%';
+		$loose = $words ? '%' . implode( '%', array_map( array( $wpdb, 'esc_like' ), $words ) ) . '%' : $lit;
+		$in    = implode( ',', array_fill( 0, count( $posts ), '%d' ) );
+		$batch = 500;
+		$ids   = array();
+
+		$offset = 0;
+		$found  = 0;
+		while ( $found <= $max ) {
+			// A review with two titles comes back twice; the keyed $ids de-duplicates.
+			$sql = "SELECT c.comment_ID, c.comment_content, t.meta_value AS title
+				FROM {$wpdb->comments} c
+				LEFT JOIN {$wpdb->commentmeta} t ON t.comment_id = c.comment_ID AND t.meta_key = '_ndvr_title'
+				WHERE c.comment_post_ID IN ({$in}) AND c.comment_approved = '1' AND c.comment_parent = 0 AND c.comment_type IN ('review','comment')
+					AND ( c.comment_content LIKE %s OR c.comment_content LIKE %s OR t.meta_value LIKE %s OR t.meta_value LIKE %s )
+				ORDER BY c.comment_date_gmt DESC, c.comment_ID DESC
+				LIMIT %d OFFSET %d";
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- placeholders built above.
+			$rows = (array) $wpdb->get_results( $wpdb->prepare( $sql, array_merge( $posts, array( $lit, $loose, $lit, $loose, $batch, $offset ) ) ) );
+			foreach ( $rows as $row ) {
+				// Visible text only: a match inside a tag name or attribute doesn't count.
+				$text = html_entity_decode( wp_strip_all_tags( (string) $row->comment_content ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) . "\n" . html_entity_decode( (string) $row->title, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+				if ( false !== mb_stripos( $text, $q, 0, 'UTF-8' ) ) {
+					$ids[ (int) $row->comment_ID ] = (int) $row->comment_ID;
+				}
+			}
+			$found = count( $ids );
+			if ( count( $rows ) < $batch ) {
+				break;
+			}
+			$offset += $batch;
+		}
+		if ( count( $ids ) > $max ) {
+			$this->search_truncated = true;
+			$ids                    = array_slice( $ids, 0, $max, true );
+		}
+		$ids = array_values( $ids );
+		set_transient(
+			$key,
+			array(
+				'ids'       => $ids,
+				'truncated' => $this->search_truncated,
+			),
+			5 * MINUTE_IN_SECONDS
+		);
+
 		return $ids;
+	}
+
+	/**
+	 * Whether a search's result is in the 5-minute cache, without running it
+	 * (the AJAX rate limit counts only fresh lookups).
+	 *
+	 * @param int    $product_id Product.
+	 * @param string $q          Query.
+	 * @return bool
+	 */
+	public static function search_is_cached( $product_id, $q ) {
+		$q = self::normalize_search( $q );
+
+		return '' !== $q && absint( $product_id ) && is_array( get_transient( self::search_key( absint( $product_id ), $q ) ) );
+	}
+
+	/**
+	 * The cache key of a search (product + pool, cap, lower-cased query).
+	 *
+	 * @param int    $product_id Product.
+	 * @param string $q          Normalised query.
+	 * @return string
+	 */
+	private static function search_key( $product_id, $q ) {
+		$posts = array_values( array_unique( array( $product_id, Pool::resolve_id( $product_id ) ) ) );
+		/** This filter is documented in search_ids(). */
+		$max = max( 1, (int) apply_filters( 'ndv-reviews/search_max_ids', 1000 ) );
+
+		return 'ndvr_sq_' . md5( implode( ',', $posts ) . '|' . $max . '|' . mb_strtolower( $q, 'UTF-8' ) );
 	}
 
 	/**
@@ -666,12 +758,14 @@ class ReviewQuery {
 	 * @param int $page Requested page.
 	 * @return array{items:array<int,array<string,mixed>>,total:int,pages:int,page:int}
 	 */
-	private function empty_result( $page ) {
+	private function empty_result( $page, $search = '' ) {
 		return array(
-			'items' => array(),
-			'total' => 0,
-			'pages' => 0,
-			'page'  => $page,
+			'items'     => array(),
+			'total'     => 0,
+			'pages'     => 0,
+			'page'      => $page,
+			'search'    => (string) $search,
+			'truncated' => false,
 		);
 	}
 

@@ -912,3 +912,11 @@ debug.log empty; phpcs: no new issues.
   All minors fixed or decided (m17: keep the Edited date on erasure).
 EVIDENCE: rr-15 43/43 (13 new checks; mutation of old M2/M3 fails 2); core flows 49/49 after flow 8 learned the
 next-request re-flush; all 20 suites green; debug.log empty; phpcs clean on the changed files.
+
+## 2026-10-11 — RR-16 code review fixed → done (owner check OC-5)
+- Review `.agents/prd/reviews/code-RR-16.md`: 0 blockers, 4 majors, 12 minors; decisions in PRD RR-16 rev 5.
+  M1 was a real regression from this build (scroll moved into the error branch): every PHP suite was green because no
+  test ran display.js's list code. rr-16-js.mjs now does (16 checks; the committed JS fails 14 of them).
+- Also this session: Pro RR-14P-4 (AI auto-publish skips reviews that were public; rr-14p.php 2/2, fails without the fix),
+  `.agents/qa/reset-qa.php`, one owner-check list at the top of TASKS.
+EVIDENCE: rr-16 42/42; all 21 suites green; debug.log empty; phpcs: no new issues.

@@ -349,3 +349,8 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   label is hooked in Plugin::boot() (not removable); the eraser keeps `_ndvr_edited_at`. Endpoint hooks bind on `init` 0
   (`bind_endpoint()`); the flag is autoloaded and deleted on (de)activation. Admin email at most once per review per hour
   (transient `ndvr_edit_mail_{id}`); customer draft after a failed save in `ndvr_edit_draft_{user}_{id}` (10 min).
+- RR-16 rev 5: every `paginate()` result has `search` and `truncated`. `ReviewQuery::SEARCH_MIN` (2),
+  `search_is_cached( $product_id, $q )`, 5-minute transient `ndvr_sq_*`; `search_max_ids` counts confirmed matches.
+  `ReviewSearch::clean( $raw )` (plain text, ≤ 200 chars); queries are not HTML-sanitised, every output escapes them. The
+  rate limit counts only uncached lookups. Clear is `a.ndvr-search-clear[href]`. `ndvrDisplay.i18n.listError`. A product
+  page with `?ndvr_q=` is noindex,follow. Matching is accent-sensitive.

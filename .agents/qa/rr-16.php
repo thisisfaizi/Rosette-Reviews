@@ -93,6 +93,8 @@ final class NDVR_QA_RR16 {
 			$this->ac12();
 			$this->ac14();
 			$this->ac13();
+			$this->review_fixes();
+			$this->js();
 		} catch ( \Throwable $e ) {
 			$this->ok( false, 'uncaught ' . get_class( $e ) . ': ' . $e->getMessage() . ' @ ' . basename( $e->getFile() ) . ':' . $e->getLine() );
 		}
@@ -401,7 +403,7 @@ final class NDVR_QA_RR16 {
 			'10.16.6.4'
 		);
 		$ah = (string) ( $a['data']['html'] ?? '' );
-		$this->ok( false === strpos( (string) $s['data']['html'], '<script>alert' ) && false === strpos( (string) $s['data']['status'], '<script' ) && 1 === (int) $p['data']['total'] && 1 === (int) $u['data']['total'] && 1 === (int) $a['data']['total'] && false !== strpos( $ah, '<mark class="ndvr-mark">&amp; chips</mark>' ), 'AC6: <script> stays escaped; "0%" and "t_c" match only literal text (1 each); "& chips" matches the &amp; review and highlights without breaking the entity' );
+		$this->ok( false === strpos( (string) $s['data']['html'], '<script>alert' ) && 'No reviews mention “<script>alert(1)</script>”' === $s['data']['status'] && false !== strpos( $this->tab( $this->p, array( 'ndvr_q' => '<script>alert(1)</script>' ) ), 'No reviews mention “&lt;script&gt;alert(1)&lt;/script&gt;”' ) && 1 === (int) $p['data']['total'] && 1 === (int) $u['data']['total'] && 1 === (int) $a['data']['total'] && false !== strpos( $ah, '<mark class="ndvr-mark">&amp; chips</mark>' ), 'AC6: <script> is searched as text (the JSON line is written with textContent; the no-JS line is escaped); "0%" and "t_c" match only literal text (1 each); "& chips" matches the &amp; review and highlights without breaking the entity' );
 
 		$st = $this->ajax(
 			array(
@@ -455,7 +457,7 @@ final class NDVR_QA_RR16 {
 			$this->ajax(
 				array(
 					'product_id' => (string) $this->p,
-					'q'          => 'battery',
+					'q'          => 'word' . $i,
 				),
 				$ip
 			);
@@ -468,7 +470,16 @@ final class NDVR_QA_RR16 {
 			),
 			$ip
 		);
-		$this->ok( 429 === end( $codes ) && ! in_array( 429, array_slice( $codes, 0, 60 ), true ) && ! empty( $page['success'] ), 'AC10: the 61st search from one IP → 429; paging without q isn\'t limited' );
+		$this->ok( 429 === end( $codes ) && ! in_array( 429, array_slice( $codes, 0, 60 ), true ) && ! empty( $page['success'] ), 'AC10: the 61st fresh search from one IP → 429; paging without q isn\'t limited' );
+		$cached = $this->ajax(
+			array(
+				'product_id' => (string) $this->p,
+				'q'          => 'word3',
+				'page'       => '2',
+			),
+			$ip
+		);
+		$this->ok( ! empty( $cached['success'] ), 'M4: paging a search already run (cached) isn\'t counted, even at the limit' );
 		$_SERVER['REMOTE_ADDR'] = $ip;
 		delete_transient( 'ndvr_rl_list_' . $this->c()->get( 'antispam' )->ip_hash() );
 	}
@@ -584,12 +595,137 @@ final class NDVR_QA_RR16 {
 		$start = microtime( true );
 		$found = 0;
 		for ( $i = 0; $i < 10; $i++ ) {
+			// Uncached: the 5-minute result cache would make this a cache read.
+			$wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '\\_transient%ndvr\\_sq\\_%'" );
+			wp_cache_flush();
 			$found = count( $query->search_ids( $p, 'battery' ) );
 		}
 		$avg = ( microtime( true ) - $start ) / 10 * 1000;
 		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->comments} WHERE comment_post_ID = %d", $p ) );
 		$this->line( sprintf( 'INFO: AC13 search_ids() on 5,000 reviews: %.1f ms average of 10 (SQLite QA site)', $avg ) );
 		$this->ok( 100 === $found && $avg < 50, sprintf( 'AC13: 5,000 seeded reviews → 100 matches in %.1f ms on average (budget 50 ms)', $avg ) );
+	}
+
+	/**
+	 * Code review RR-16 (reviews/code-RR-16.md): M2, M3, m1, m5, m9, m12 and
+	 * harness gaps 2–4 and 7.
+	 *
+	 * @return void
+	 */
+	private function review_fixes() {
+		global $wpdb;
+
+		// Gap 2 / M2: search + "With photos" with no photo matches keeps the search line.
+		$res = $this->ajax(
+			array(
+				'product_id' => (string) $this->p,
+				'q'          => 'battery',
+				'with_media' => '1',
+			),
+			'10.16.20.1'
+		);
+		$this->ok( 'battery' === ( $res['data']['q'] ?? '' ) && 0 === (int) $res['data']['total'] && 'No reviews mention “battery”' === $res['data']['status'], 'M2: battery + With photos (none) → "No reviews mention “battery”", not "Type at least…"' );
+
+		// m1, m5: plain-text queries.
+		$p = $this->product( 'Text' );
+		for ( $i = 0; $i < 10; $i++ ) {
+			$this->review( $p, 'Filler review ' . $i . ' about delivery.' );
+		}
+		$this->review( $p, 'I <3 this 100%acrylic scarf.' );
+		$this->review( $p, 'Don’t & won’t shrink, they said.' );
+		$heart  = $this->ajax( array( 'product_id' => (string) $p, 'q' => '<3 this' ), '10.16.21.1' );
+		$pct    = $this->ajax( array( 'product_id' => (string) $p, 'q' => '100%acrylic' ), '10.16.21.2' );
+		$quote  = $this->ajax( array( 'product_id' => (string) $p, 'q' => 'don’t & won’t' ), '10.16.21.3' );
+		$this->ok( 1 === (int) ( $heart['data']['total'] ?? 0 ) && 1 === (int) ( $pct['data']['total'] ?? 0 ) && 1 === (int) ( $quote['data']['total'] ?? 0 ) && false !== strpos( (string) $heart['data']['html'], '<mark class="ndvr-mark">&lt;3 this</mark>' ) && '1 review mentions “<3 this”' === $heart['data']['status'], 'm1/m5: "<3 this", "100%acrylic" and "don’t & won’t" are searched as typed and found once each; the mark is escaped' );
+
+		// Gap 4: pending, spam, trashed reviews and replies are never found.
+		$pending = $this->review( $p, 'Hidden zebra words pending.' );
+		wp_set_comment_status( $pending, 'hold' );
+		$spam = $this->review( $p, 'Hidden zebra words spam.' );
+		wp_spam_comment( $spam );
+		$trash = $this->review( $p, 'Hidden zebra words trash.' );
+		wp_trash_comment( $trash );
+		$reply = (int) wp_insert_comment(
+			array(
+				'comment_post_ID'  => $p,
+				'comment_type'     => 'review',
+				'comment_parent'   => $pending,
+				'comment_approved' => 1,
+				'comment_content'  => 'Hidden zebra words reply.',
+			)
+		);
+		$this->fx['comments'][] = $reply;
+		$z = $this->ajax( array( 'product_id' => (string) $p, 'q' => 'zebra' ), '10.16.22.1' );
+		$this->ok( 0 === (int) ( $z['data']['total'] ?? -1 ), 'Gap 4: pending, spam, trashed reviews and replies never match' );
+
+		// m12: a private product doesn't reveal it has enough reviews.
+		wp_update_post(
+			array(
+				'ID'          => $p,
+				'post_status' => 'private',
+			)
+		);
+		$private = ReviewSearch::available( $p );
+		wp_update_post(
+			array(
+				'ID'          => $p,
+				'post_status' => 'publish',
+			)
+		);
+		$this->ok( false === $private && true === ReviewSearch::available( $p ), 'm12: a private product gets no search box (and no status line)' );
+
+		// M3 (gap 3): the cap counts confirmed matches only, and says so.
+		$cap = static function () {
+			return 2;
+		};
+		add_filter( 'ndv-reviews/search_max_ids', $cap );
+		$ids     = $this->c()->get( 'review_query' )->search_ids( $this->p, 'battery' );
+		$capped  = $this->ajax( array( 'product_id' => (string) $this->p, 'q' => 'battery' ), '10.16.23.1' );
+		remove_filter( 'ndv-reviews/search_max_ids', $cap );
+		$this->ok( 2 === count( $ids ) && 2 === (int) ( $capped['data']['total'] ?? 0 ) && 'More than 2 reviews mention “battery”. The newest are shown.' === ( $capped['data']['status'] ?? '' ), 'M3: with a cap of 2, the 2 newest of 4 matches come back and the line says there are more' );
+
+		// Gap 7: AC9 with a query that matches only some reviews of the small product.
+		$small = $this->ajax( array( 'product_id' => (string) $this->small, 'q' => 'fine 1' ), '10.16.24.1' );
+		$this->ok( '' === ( $small['data']['q'] ?? 'x' ) && 5 === (int) ( $small['data']['total'] ?? 0 ), 'Gap 7: below the minimum, a query that would match one review still returns all 5 (q ignored)' );
+
+		// m9: a no-JS search page asks not to be indexed.
+		global $post, $wp_query;
+		$saved_query = $wp_query;
+		$wp_query    = new \WP_Query( array( 'p' => $this->p, 'post_type' => 'product' ) ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+		$_GET        = array( 'ndvr_q' => 'battery' );
+		$robots      = apply_filters( 'wp_robots', array() );
+		$_GET        = array();
+		$wp_query    = $saved_query; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+		$this->ok( ! empty( $robots['noindex'] ) && ! empty( $robots['follow'] ), 'm9: a product page with ?ndvr_q= is noindex, follow' );
+		unset( $post );
+	}
+
+	/**
+	 * The display.js list/search code, run in node by rr-16-js.mjs.
+	 *
+	 * @return void
+	 */
+	private function js() {
+		$pipes = array();
+		$proc  = proc_open( array( 'node', __DIR__ . '/rr-16-js.mjs' ), array( array( 'pipe', 'r' ), array( 'pipe', 'w' ), array( 'pipe', 'w' ) ), $pipes );
+		if ( ! is_resource( $proc ) ) {
+			$this->ok( false, 'JS: node could not be started' );
+			return;
+		}
+		fclose( $pipes[0] );
+		$out  = (string) stream_get_contents( $pipes[1] );
+		$err  = (string) stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		$code = proc_close( $proc );
+		$seen = 0;
+		foreach ( preg_split( '/\r?\n/', $out ) as $row ) {
+			if ( preg_match( '/^(PASS|FAIL): (.*)$/', $row, $m ) ) {
+				++$seen;
+				$this->ok( 'PASS' === $m[1], 'JS: ' . $m[2] );
+			}
+		}
+		$this->ok( $seen > 0 && 0 === $code, 'JS: rr-16-js.mjs ran ' . $seen . ' checks and exited ' . $code . ( '' !== trim( $err ) ? ' (' . trim( $err ) . ')' : '' ) );
 	}
 
 	/**
@@ -610,6 +746,9 @@ final class NDVR_QA_RR16 {
 			update_option( NDVR_OPTION_SETTINGS, $this->saved['free'] );
 		}
 		update_option( 'permalink_structure', $this->saved['perma'] );
+		global $wpdb;
+		$wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '\\_transient\\_ndvr\\_sq\\_%' OR option_name LIKE '\\_transient\\_timeout\\_ndvr\\_sq\\_%' OR option_name LIKE '\\_transient\\_ndvr\\_rl\\_list\\_%' OR option_name LIKE '\\_transient\\_timeout\\_ndvr\\_rl\\_list\\_%'" );
+		wp_cache_flush();
 		$this->line( 'cleanup: fixtures removed, settings restored' );
 	}
 

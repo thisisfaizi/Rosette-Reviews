@@ -132,6 +132,7 @@ class Renderer implements Registerable {
 					'reportDuplicate' => __( 'You\'ve already reported this review.', 'rosette-reviews' ),
 					'reportLimited'   => __( 'Too many reports from you. Try again later.', 'rosette-reviews' ),
 					'reportError'     => __( 'Your report could not be sent. Please try again.', 'rosette-reviews' ),
+					'listError'       => __( 'The reviews could not be loaded. Please try again.', 'rosette-reviews' ),
 				),
 			)
 		);
@@ -283,7 +284,7 @@ class Renderer implements Registerable {
 					'search'     => $raw,
 				)
 			);
-			ReviewSearch::set_current( $raw, (string) ( $result['search'] ?? '' ), (int) $result['total'] );
+			ReviewSearch::set_current( $raw, (string) ( $result['search'] ?? '' ), (int) $result['total'], $product_id, ! empty( $result['truncated'] ) );
 
 			$this->render_topic_pills( $product_id );
 			$this->render_filter_bar( $product_id );
@@ -294,6 +295,7 @@ class Renderer implements Registerable {
 				array(
 					'result'     => $result,
 					'vote_nonce' => wp_create_nonce( Votes::NONCE_ACTION ),
+					'filtered'   => '' !== (string) ( $result['search'] ?? '' ),
 				)
 			);
 			echo $list_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- template output is escaped at source.
@@ -450,24 +452,32 @@ class Renderer implements Registerable {
 			}
 		}
 		// Text search (RR-16).
-		$raw = isset( $_POST['q'] ) && is_scalar( $_POST['q'] ) ? trim( sanitize_text_field( wp_unslash( (string) $_POST['q'] ) ) ) : '';
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- plain text, cleaned by ReviewSearch::clean().
+		$raw = isset( $_POST['q'] ) ? ReviewSearch::clean( wp_unslash( $_POST['q'] ) ) : '';
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		if ( '' !== $raw ) {
-			/**
-			 * Filter the searches one visitor may run per hour.
-			 *
-			 * @param int $max Default 60.
-			 */
-			$limit = \NdvReviews\Plugin::instance()->container()->get( 'antispam' )->rate_limit( 'list', (int) apply_filters( 'ndv-reviews/search_rate_limit_per_hour', 60 ) );
-			if ( is_wp_error( $limit ) ) {
-				wp_send_json_error( array( 'message' => __( 'Too many searches. Try again in a few minutes.', 'rosette-reviews' ) ), 429 );
-			}
 			// Search is per product, never store-wide.
 			if ( ! $product_id ) {
 				wp_send_json_error( array( 'message' => __( 'Search needs a product.', 'rosette-reviews' ) ), 400 );
 			}
 			if ( ! ReviewSearch::available( $product_id ) ) {
 				$raw = '';
+			}
+		}
+		$q_used = ReviewQuery::normalize_search( $raw );
+		if ( '' !== $q_used ) {
+			// Count only lookups that will hit the database: paging, sorting and
+			// filtering a search reuse its cached result (5 minutes).
+			if ( ! ReviewQuery::search_is_cached( $product_id, $q_used ) ) {
+				/**
+				 * Filter the fresh searches one visitor may run per hour.
+				 *
+				 * @param int $max Default 60.
+				 */
+				$limit = \NdvReviews\Plugin::instance()->container()->get( 'antispam' )->rate_limit( 'list', (int) apply_filters( 'ndv-reviews/search_rate_limit_per_hour', 60 ) );
+				if ( is_wp_error( $limit ) ) {
+					wp_send_json_error( array( 'message' => __( 'Too many searches. Try again in a few minutes.', 'rosette-reviews' ) ), 429 );
+				}
 			}
 		}
 
@@ -502,7 +512,7 @@ class Renderer implements Registerable {
 				// RR-16 (NDVR_API 10): the matching total, the query used, the line to announce.
 				'total'  => (int) $result['total'],
 				'q'      => $q,
-				'status' => ReviewSearch::status_text( $raw, $q, (int) $result['total'] ),
+				'status' => ReviewSearch::status_text( $raw, $q, (int) $result['total'], ! empty( $result['truncated'] ) ),
 			)
 		);
 	}

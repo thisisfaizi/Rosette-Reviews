@@ -31,7 +31,7 @@
 				tag: '',
 				answers: {},
 				// RR-16: starts from the box (a no-JS search may have filled it).
-				q: searchInput( wrap ) ? searchInput( wrap ).value.trim() : '',
+				q: searchInput( wrap ) ? searchInput( wrap ).defaultValue.trim() : '',
 				page: 1,
 				perPage: parseInt( wrap.getAttribute( 'data-per-page' ), 10 ) || 0
 			};
@@ -79,38 +79,58 @@
 			wrap.dispatchEvent( new window.CustomEvent( 'ndvr:list-request', { bubbles: true, detail: { body: body, state: state } } ) );
 		}
 
+		// Only the newest request may update the list: a slow earlier reply is
+		// dropped (fast searches can come back out of order).
+		var seq = ( wrap.ndvrSeq || 0 ) + 1;
+		wrap.ndvrSeq = seq;
+
 		fetch( cfg.ajaxUrl, { method: 'POST', credentials: 'same-origin', body: body } )
 			.then( function ( r ) { return r.json(); } )
 			.then( function ( res ) {
+				if ( seq !== wrap.ndvrSeq ) {
+					return;
+				}
 				listWrap.classList.remove( 'is-loading' );
 				if ( res && res.success && res.data && typeof res.data.html === 'string' ) {
 					listWrap.innerHTML = res.data.html;
 					searchStatus( wrap, typeof res.data.status === 'string' ? res.data.status : '' );
-				} else if ( res && res.data && res.data.message && state.q ) {
-					searchStatus( wrap, res.data.message );
 					if ( scroll ) {
 						listWrap.scrollIntoView( { behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' } );
 					}
+				} else if ( state.q ) {
+					searchStatus( wrap, ( res && res.data && res.data.message ) || ( cfg.i18n && cfg.i18n.listError ) || '', true );
 				}
 				listWrap.setAttribute( 'aria-busy', 'false' );
 			} )
 			.catch( function () {
+				if ( seq !== wrap.ndvrSeq ) {
+					return;
+				}
 				listWrap.classList.remove( 'is-loading' );
 				listWrap.setAttribute( 'aria-busy', 'false' );
+				if ( state.q ) {
+					searchStatus( wrap, ( cfg.i18n && cfg.i18n.listError ) || '', true );
+				}
 			} );
 	}
 
-	// The search line (role=status): cleared first, then written on the next
-	// tick, so the same result announces again.
-	function searchStatus( wrap, text ) {
+	// The search line (role=status). It speaks only when its text changes, or
+	// when forced (a new search, an error): paging through a search stays
+	// quiet. A forced repeat is cleared first and written on the next tick.
+	function searchStatus( wrap, text, force ) {
 		var status = wrap.querySelector( '.ndvr-search-status' );
 		var clear  = wrap.querySelector( '.ndvr-search-clear' );
+		var state  = getState( wrap );
 		if ( clear ) {
-			clear.hidden = ! getState( wrap ).q;
+			clear.hidden = ! state.q;
 		}
 		if ( ! status ) {
 			return;
 		}
+		if ( ! force && ! state.announce && status.textContent === ( text || '' ) ) {
+			return;
+		}
+		state.announce = false;
 		status.textContent = '';
 		setTimeout( function () {
 			status.textContent = text || '';
@@ -583,10 +603,25 @@
 		e.preventDefault();
 		var input = searchInput( wrap );
 		var state = getState( wrap );
-		state.q    = input ? input.value.trim() : '';
-		state.page = 1;
+		state.q        = input ? input.value.trim() : '';
+		state.page     = 1;
+		state.announce = true;
 		fetchList( wrap, false );
 	} );
+
+	// The browser's own clear (✕ or Escape in a search field) fires `search`.
+	document.addEventListener( 'search', function ( e ) {
+		var input = e.target;
+		var wrap  = input && input.closest ? closest( input, INSTANCE ) : null;
+		if ( ! wrap || ! closest( input, '.ndvr-search' ) || '' !== input.value || ! getState( wrap ).q ) {
+			return;
+		}
+		var state      = getState( wrap );
+		state.q        = '';
+		state.page     = 1;
+		state.announce = true;
+		fetchList( wrap, false );
+	}, true );
 
 	document.addEventListener( 'click', function ( e ) {
 		var clear = closest( e.target, '.ndvr-search-clear' );
@@ -594,14 +629,16 @@
 		if ( ! wrap ) {
 			return;
 		}
+		e.preventDefault(); // It is a link to the page without the search (no-JS).
 		var input = searchInput( wrap );
 		if ( input ) {
 			input.value = '';
 			input.focus();
 		}
 		var state = getState( wrap );
-		state.q    = '';
-		state.page = 1;
+		state.q        = '';
+		state.page     = 1;
+		state.announce = true;
 		fetchList( wrap, false );
 	} );
 

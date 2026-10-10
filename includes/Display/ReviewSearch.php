@@ -27,11 +27,11 @@ class ReviewSearch implements Registerable {
 	const GET_PARAM = 'ndvr_q';
 
 	/**
-	 * The tab's current search, for the box it prints: raw, q, total.
+	 * The tab's current search per product, for the box it prints.
 	 *
-	 * @var array{raw:string,q:string,total:int}|null
+	 * @var array<int,array{raw:string,q:string,total:int,truncated:bool}>
 	 */
-	private static $current = null;
+	private static $current = array();
 
 	/**
 	 * Register hooks.
@@ -42,6 +42,22 @@ class ReviewSearch implements Registerable {
 		add_action( 'ndv-reviews/filter_bar_end', array( $this, 'render_box' ) );
 		add_filter( 'ndv-reviews/review_body_html', array( __CLASS__, 'highlight_review' ), 10, 2 );
 		add_filter( 'ndv-reviews/review_title_html', array( __CLASS__, 'highlight_review' ), 10, 2 );
+		add_filter( 'wp_robots', array( __CLASS__, 'robots' ) );
+	}
+
+	/**
+	 * A no-JS search page (?ndvr_q=) isn't for search engines (m9).
+	 *
+	 * @param array<string,bool|string> $robots Directives.
+	 * @return array<string,bool|string>
+	 */
+	public static function robots( $robots ) {
+		if ( '' !== self::get_query() && function_exists( 'is_product' ) && is_product() ) {
+			$robots['noindex'] = true;
+			$robots['follow']  = true;
+		}
+
+		return $robots;
 	}
 
 	/**
@@ -62,35 +78,60 @@ class ReviewSearch implements Registerable {
 		 * @param int $min        Default 10.
 		 * @param int $product_id Product.
 		 */
+		// Never reveal anything about a draft, private or password-locked product.
+		if ( 'publish' !== get_post_status( $product_id ) || post_password_required( $product_id ) ) {
+			return false;
+		}
 		$min   = max( 0, (int) apply_filters( 'ndv-reviews/search_min_reviews', 10, $product_id ) );
-		$count = (int) AggregateStore::get( Pool::resolve_id( $product_id ) )['count'];
+		$agg   = AggregateStore::get( Pool::resolve_id( $product_id ) );
+		$count = max( (int) $agg['count'], (int) array_sum( (array) $agg['counts'] ) );
 
 		return $count >= $min;
 	}
 
 	/**
-	 * The query from the no-JS GET (raw, unslashed and sanitised).
+	 * The query from the no-JS GET, as plain text (every output escapes it).
 	 *
 	 * @return string
 	 */
 	public static function get_query() {
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- a public, read-only search.
-		return isset( $_GET[ self::GET_PARAM ] ) && is_scalar( $_GET[ self::GET_PARAM ] ) ? trim( sanitize_text_field( wp_unslash( (string) $_GET[ self::GET_PARAM ] ) ) ) : '';
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- a public, read-only search; plain text, cleaned by clean().
+		return isset( $_GET[ self::GET_PARAM ] ) && is_scalar( $_GET[ self::GET_PARAM ] ) ? self::clean( wp_unslash( (string) $_GET[ self::GET_PARAM ] ) ) : '';
+	}
+
+	/**
+	 * What a shopper typed, as plain text: valid UTF-8, no control characters,
+	 * single spaces, at most 200 characters (only 2–80 are searched).
+	 *
+	 * @param mixed $raw Unslashed input.
+	 * @return string
+	 */
+	public static function clean( $raw ) {
+		if ( ! is_scalar( $raw ) ) {
+			return '';
+		}
+		$text = wp_check_invalid_utf8( (string) $raw, true );
+		$text = trim( (string) preg_replace( '/[\x00-\x1F\x7F\s]+/u', ' ', $text ) );
+
+		return mb_substr( $text, 0, 200, 'UTF-8' );
 	}
 
 	/**
 	 * Remember the tab's search so the box can show it.
 	 *
-	 * @param string $raw   What the shopper typed (sanitised).
-	 * @param string $q     The query used ('' when ignored).
-	 * @param int    $total Matching reviews.
+	 * @param string $raw        What the shopper typed (cleaned).
+	 * @param string $q          The query used ('' when ignored).
+	 * @param int    $total      Matching reviews.
+	 * @param int    $product_id Product the tab is for.
+	 * @param bool   $truncated  More matches exist than were counted.
 	 * @return void
 	 */
-	public static function set_current( $raw, $q, $total ) {
-		self::$current = array(
-			'raw'   => (string) $raw,
-			'q'     => (string) $q,
-			'total' => (int) $total,
+	public static function set_current( $raw, $q, $total, $product_id = 0, $truncated = false ) {
+		self::$current[ absint( $product_id ) ] = array(
+			'raw'       => (string) $raw,
+			'q'         => (string) $q,
+			'total'     => (int) $total,
+			'truncated' => (bool) $truncated,
 		);
 	}
 
@@ -99,15 +140,28 @@ class ReviewSearch implements Registerable {
 	 *
 	 * @param string $raw   What was typed.
 	 * @param string $q     The query used ('' when ignored).
-	 * @param int    $total Matches.
+	 * @param int    $total     Matches.
+	 * @param bool   $truncated More matches exist than were counted.
 	 * @return string '' when nothing was searched.
 	 */
-	public static function status_text( $raw, $q, $total ) {
+	public static function status_text( $raw, $q, $total, $truncated = false ) {
 		if ( '' === (string) $raw ) {
 			return '';
 		}
 		if ( '' === (string) $q ) {
-			return __( 'Type at least 2 characters to search.', 'rosette-reviews' );
+			return sprintf(
+				/* translators: %d: shortest search, in characters. */
+				_n( 'Type at least %d character to search.', 'Type at least %d characters to search.', ReviewQuery::SEARCH_MIN, 'rosette-reviews' ),
+				ReviewQuery::SEARCH_MIN
+			);
+		}
+		if ( $truncated ) {
+			return sprintf(
+				/* translators: 1: number of reviews shown, 2: the search words. */
+				__( 'More than %1$s reviews mention “%2$s”. The newest are shown.', 'rosette-reviews' ),
+				number_format_i18n( $total ),
+				$q
+			);
 		}
 		if ( $total <= 0 ) {
 			/* translators: %s: the search words. */
@@ -133,10 +187,11 @@ class ReviewSearch implements Registerable {
 		if ( ! self::available( $product_id ) ) {
 			return;
 		}
-		$current = self::$current ? self::$current : array(
-			'raw'   => '',
-			'q'     => '',
-			'total' => 0,
+		$current = self::$current[ $product_id ] ?? array(
+			'raw'       => '',
+			'q'         => '',
+			'total'     => 0,
+			'truncated' => false,
 		);
 
 		// A GET form replaces the action's query string, so with plain permalinks
@@ -148,9 +203,9 @@ class ReviewSearch implements Registerable {
 			$hidden = wp_parse_args( $parts['query'] );
 		}
 		$action = strtok( $link, '?' );
-		$id     = 'ndvr-search-' . $product_id;
+		$id     = wp_unique_id( 'ndvr-search-' . $product_id . '-' );
 		?>
-		<form class="ndvr-search" role="search" method="get" action="<?php echo esc_url( $action . '#tab-reviews' ); ?>">
+		<form class="ndvr-search" role="search" aria-label="<?php esc_attr_e( 'Search reviews', 'rosette-reviews' ); ?>" method="get" action="<?php echo esc_url( $action . '#tab-reviews' ); ?>">
 			<?php foreach ( $hidden as $name => $value ) : ?>
 				<?php if ( is_scalar( $value ) && self::GET_PARAM !== $name ) : ?>
 					<input type="hidden" name="<?php echo esc_attr( (string) $name ); ?>" value="<?php echo esc_attr( (string) $value ); ?>" />
@@ -159,8 +214,9 @@ class ReviewSearch implements Registerable {
 			<label for="<?php echo esc_attr( $id ); ?>"><?php esc_html_e( 'Search reviews', 'rosette-reviews' ); ?></label>
 			<input type="search" id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( self::GET_PARAM ); ?>" minlength="2" maxlength="80" value="<?php echo esc_attr( $current['raw'] ); ?>" />
 			<button type="submit" class="ndvr-search-submit"><?php esc_html_e( 'Search', 'rosette-reviews' ); ?></button>
-			<button type="button" class="ndvr-search-clear"<?php echo '' === $current['raw'] ? ' hidden' : ''; ?>><?php esc_html_e( 'Clear search', 'rosette-reviews' ); ?></button>
-			<p class="ndvr-search-status" role="status" aria-live="polite"><?php echo esc_html( self::status_text( $current['raw'], $current['q'], $current['total'] ) ); ?></p>
+			<?php // A link, so it also clears without JS (the page without ?ndvr_q). ?>
+			<a class="ndvr-search-clear" href="<?php echo esc_url( $link . '#tab-reviews' ); ?>"<?php echo '' === $current['raw'] ? ' hidden' : ''; ?>><?php esc_html_e( 'Clear search', 'rosette-reviews' ); ?></a>
+			<p class="ndvr-search-status" role="status" aria-live="polite"><?php echo esc_html( self::status_text( $current['raw'], $current['q'], $current['total'], $current['truncated'] ) ); ?></p>
 		</form>
 		<?php
 	}
