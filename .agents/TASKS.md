@@ -5,6 +5,20 @@ Row format:
 Status: `todo` → `in_progress` → `in_review` → `done`. Update at every transition (§8.1 of AGENTS.md).
 Cross-plugin tasks are duplicated on the Pro board with the same id.
 
+## Owner checks before release (one list; "done" below is not release-ready until these pass)
+These need a real browser, screen reader, store theme or legal judgement, which the automated harnesses can't give.
+| # | feature | check | gate |
+|---|---|---|---|
+| OC-1 | RR-13 captcha | Turnstile + hCaptcha test keys: one product form and two testimonial forms on one page; early submit, error then resubmit, double click; console free of the hCaptcha "render before js api" warning | **approval gate** |
+| OC-2 | RR-14 report | Escape and focus return; the status line announced by a screen reader (NVDA/Firefox, VoiceOver/Safari); the open form's width at desktop and mobile; the tab plus a shortcode list after filtering both | **approval gate** |
+| OC-3 | RR-12 minimum length | Screen-reader timing of the "Minimum length reached" announcement | not a gate |
+| OC-4 | RR-15 My Account | The account page and edit form on the store theme (no JS needed), screen-reader text, RTL | not a gate |
+| OC-5 | RR-16 search | Status line announced; no-JS search through a page cache | not a gate |
+| OC-6 | release | Regenerate `languages/rosette-reviews.pot` (RR-13-f2; RR-11 to RR-16 strings are missing) | **release gate** |
+| OC-7 | RR-10 (Pro) | Counsel confirms the list-campaign attestation and FTC wording | **release gate** |
+| OC-8 | website | Version shown vs next-release features; domain; WordPress.org links 404 until approval; About/Contact page | release gate |
+| OC-9 | QA hygiene | After any suite dies mid-run, run `.agents/qa/reset-qa.php` before trusting failures (stale Pro settings, webhook queue, rate-limit buckets) | process |
+
 ## Done (shipped)
 | id | title | plugin | shipped |
 |---|---|---|---|
