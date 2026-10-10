@@ -1,10 +1,19 @@
 # RR-22: Service recovery (low-rating alerts, cases and update invitations)
 
-Status: prd-ok (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Depends on RR-00 (F1, F4, F6, F8.1, F8.2 Pro task, F8.3, F9), RR-15 (`update()` with its edit window and invite exemption, pending revisions, prefill rule, edit form partial), RR-09 (token API pattern) · Raises `NDVR_API` to **11** (RR-00 F3b; planned build order, final at merge) · **Innovation:** no competitor combines these steps self-hosted. Parts exist elsewhere: Judge.me's support prompt, WiserReview's "ask to revise".
+Status: building (rev 5) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Depends on RR-00 (F1, F4, F6, F8.1, F8.2 Pro task, F8.3, F9), RR-15 (`update()` with its edit window and invite exemption, pending revisions, prefill rule, edit form partial), RR-09 (token API pattern) · Raises `NDVR_API` to **11** (RR-00 F3b; planned build order, final at merge) · **Innovation:** no competitor combines these steps self-hosted. Parts exist elsewhere: Judge.me's support prompt, WiserReview's "ask to revise".
 
 Review findings applied: round 2 RR-22 items 1 (legal: case and invite decoupled from the rating), 2 (edit window in `update()`, invite exemption, prefill) and 3 (`rating` key); round 3 batch B items 3 (ownership check for guest `list_link` reviews), 4 (invite lock re-reads `invited_at` and is kept), 5 (edit branch before `resolve()`, used-token and PRG states) and 7 (callers pass `submitted_at` to `apply_pending_edit()`).
 
 `ReviewRepository`, `TokenRepository` and `Mailer` are instance services reached through the container. `Class::method()` below names the method, not a static call.
+
+Rev 5 (reconciled with the code after RR-11 to RR-21, before building):
+- **API level:** RR-20 took 11 and RR-21 took 12, so this feature raises `NDVR_API` to **13** (every "11" in §6 and §5's Pro tasks means 13).
+- **RR-15 is in:** `ReviewEditor::editable( $id, $auth, 'invite' )` skips the edit window, `update()` reads `via`, and `ReviewEdits::transparency()` already words the `edits` sentence from the fact `edit_invites`. This feature adds that fact through `ndv-reviews/transparency_facts`.
+- **Trusted email in free:** the rule in §8 is implemented once in free as `Reviews\Sources::trusted_email( \WP_Comment )` (Pro's RR-17 `ReplyNotice::trusted_email()` implements the same rule; optional Pro task RR-22P-5 switches it to free's at `free_api( 13 )`).
+- **Release gate as built:** `ndv-reviews/recovery_invites_available` defaults to `Recovery::INVITES_SIGNED_OFF`, which ships `false` until the legal sign-off is recorded in LOG (owner check OC-13). Tests turn it on with the filter. Everything else (alerts, support message, cases) works without it.
+- **Line numbers moved:** success messages ReviewForm ~:676, TestimonialForm ~:352, Landing ~:440; `Landing::maybe_render()` ~:150 (`request_token()`, `resolve()` at ~:156, `nocache_headers()` ~:158); `handle_submit()` ~:275; token types at TokenRepository.php:167 (create_row).
+- **Pro RR-22P-1 is built with this feature:** `Moderation\Plus` returns true from `ndv-reviews/recovery_alert_handled` while its own low-rating alert is on. RR-22P-4 (auto-approve by stars) is already gone (Plus approves verified buyers only).
+- **RR-21:** an invited update goes through `update()`, not `create()`, so it is never re-scored (as RR-21 rev 5 states).
 
 ## 1. Problem and who it's for
 A 1 or 2★ review usually means an unsolved problem: a broken item, a late delivery, the wrong size. Merchants learn about it late, and the customer never hears back. This feature helps the merchant notice and fix problems. It never changes how a review is handled:

@@ -410,6 +410,7 @@ class Landing implements Registerable {
 				'answers'         => $answers,
 				'answers_present' => $present,
 				'order_id'        => $is_list ? 0 : (int) $row->order_id,
+				'token_id'        => (int) $row->id,
 				'consent'         => ! empty( $input['ndvr_consent'] ),
 				'approved'        => 0,
 			)

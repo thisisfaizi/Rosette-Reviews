@@ -1,8 +1,27 @@
 # RR-21: Review integrity signals (local fake-review risk score)
 
-Status: prd-ok (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · No table, no DB version (see §7) · No Pro-facing API, so no `NDVR_API` change · **Innovation:** no competitor does this self-hosted. Yotpo and WiserReview use cloud AI; CusRev uses its cloud verification.
+Status: in_review (rev 6) · Plan: F · Inherits PRD-00 + RR-00 · No table, no DB version (see §7) · No Pro-facing API, so no `NDVR_API` change · **Innovation:** no competitor does this self-hosted. Yotpo and WiserReview use cloud AI; CusRev uses its cloud verification.
 
 Review findings applied: round 2 RR-21 item 1 (score and hold placement in `create()`); round 3 batch B item 8 (the `integrity` sentence is canonical here).
+
+Rev 6 (as built):
+- **Service** `integrity` (`Integrity\Scorer`, Registerable). `create()` computes the IP and `is_verified()` once above the insert, scores interactive sources after `validate_review`, applies the inline hold, stores `_ndvr_token_id` when passed, and calls `Scorer::save()` before `review_created`, so listeners (Pro AI) see the score.
+- **Hold scope:** the inline hold applies when a `should_approve` rule approved the review, not when the calling code itself passed `approved => true` (no free form can; code that asks for approval is trusted, as before). Found by rr-15, whose fixtures publish through `create()`.
+- **Reasons stored:** `ip_burst`/`email_burst` hold the count including this review; `similar` the matched review id; `fast` the seconds; `links` the link count; others 1.
+- **`Scorer::holds( $comment_id )`** (NDVR_API 12): true when the hold is on and the stored score is High; Pro AI auto-publish skips such reviews (RR-21P-3, built).
+- **Admin:** column `risk` before the date ("Not checked" for older reviews), view `high_risk` (approved and pending), Overview chip counts pending High reviews, edit-screen row `#ndvr-risk` notes when the hold changed the decision. Pills: neutral, amber, danger in admin.css.
+- **Privacy:** an exporter "Rosette Reviews: review checks"; free's review eraser deletes the four keys.
+- **Tests:** rr-21.php 24/24; AC13 17.4 ms per score with 3,000 extra reviews on the SQLite QA site (the bounded queries keep the cost flat; 50,000 was not seeded on this memory-constrained machine). Pro rr-14p.php adds RR-21P-3.
+
+Rev 5 (reconciled with the code after RR-11 to RR-20, before building):
+- **Line numbers moved:** in `ReviewRepository::create()` `should_approve` is at :157, `validate_review` :165-168, `$commentdata` :170-183, the insert :186, `_ndvr_order_id` :228, `is_verified()` :239. The order the PRD sets is unchanged and still fits.
+- **Length:** RR-12 shipped as `Reviews\ReviewLength::count( $html )` (not `content_length()`); `short_text` uses it.
+- **Admin patterns:** the column, view and Overview chip follow RR-14's `Reviews\Reports` (`moderation_columns`, `moderation_column_risk`, `moderation_views`, `dashboard/after_kpis`). The settings join the "Reviews and trust" card through `ndv-reviews/settings_fields` (`card => 'trust'`), as `Display\Transparency` does.
+- **Landing:** `Landing::handle_submit()` passes `token_id => (int) $row->id` to `create()` (the call is now at Landing.php ~:395).
+- **Pro AI auto-publish (new paired task RR-21P-3):** Pro `AI\Ai::enrich()` can publish a pending review later (`ai_auto_publish_clean`); it already skips reviews held after reports, published before or edited (RR-14P-4). A held high-risk review must be skipped too, or the hold is bypassed one request later. Free adds `Integrity\Scorer::holds( int $comment_id ): bool` (true when `integrity_hold_high` is on and the stored score is at the High level), and **`NDVR_API` rises to 12** for it. Pro calls it only at `free_api( 12 )`. Built with this feature.
+- **Edits (RR-15):** an edited review isn't re-scored (the score describes the submission). Documented in the readme note.
+- **Disposable domains (build spike):** no web check is run from this machine, so the fallback is used: a list of about 100 well-known disposable domains written for this plugin (GPL), extendable through `ndv-reviews/disposable_domains`. No third-party list is bundled.
+- **Benchmark (AC13):** the QA site is SQLite in a CLI process; the figure is recorded with that caveat, on 5,000 seeded reviews (the machine is memory-constrained), and the bounded algorithm is what keeps the cost flat.
 
 ## 1. Problem and who it's for
 Fake and manipulated reviews are regulated: the US FTC rule (16 CFR 465), the UK DMCC Act 2024 and the EU Omnibus Directive. Merchants are expected to take reasonable steps, and they have no tooling unless they send data to a SaaS. We can compute transparent risk signals **locally**, from data we already hold, with no external calls and no AI, and explain each one. This is for any store that publishes reviews, and especially stores using Pro auto-approve.

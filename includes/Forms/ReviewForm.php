@@ -532,6 +532,7 @@ class ReviewForm implements Registerable {
 			<p class="ndvr-hp" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;">
 				<label for="<?php echo esc_attr( AntiSpam::HONEYPOT ); ?>"><?php esc_html_e( 'Leave this field empty', 'rosette-reviews' ); ?></label>
 				<input type="text" id="<?php echo esc_attr( AntiSpam::HONEYPOT ); ?>" name="<?php echo esc_attr( AntiSpam::HONEYPOT ); ?>" tabindex="-1" autocomplete="off" />
+				<?php echo \NdvReviews\Integrity\Scorer::rt_field(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in rt_field(). ?>
 			</p>
 
 			<?php if ( 'none' !== $captcha ) : ?>
@@ -660,6 +661,7 @@ class ReviewForm implements Registerable {
 				'answers_present' => $present,
 				'consent'         => ! empty( $input['ndvr_consent'] ),
 				'approved'        => 0,
+				'render_ts'       => isset( $input['ndvr_rt'] ) && is_string( $input['ndvr_rt'] ) ? $input['ndvr_rt'] : '',
 			)
 		);
 

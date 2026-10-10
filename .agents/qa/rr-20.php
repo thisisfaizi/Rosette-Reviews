@@ -247,7 +247,7 @@ final class NDVR_QA_RR20 {
 		$col = $wpdb->get_var( 'SELECT COUNT(scope_ids) FROM ' . $wpdb->prefix . NDVR_TABLE_PREFIX . 'criteria' );
 		$err = $wpdb->last_error;
 		$wpdb->suppress_errors( false );
-		$this->ok( null !== $col && '' === $err && Installer::is_current( Installer::V_CRITERIA_SCOPE ) && 8 === Installer::V_CRITERIA_SCOPE && 11 === NDVR_API, 'AC1: the upgrade added ndvr_criteria.scope_ids and the stored version reached V_CRITERIA_SCOPE (8); NDVR_API is 11' );
+		$this->ok( null !== $col && '' === $err && Installer::is_current( Installer::V_CRITERIA_SCOPE ) && 8 === Installer::V_CRITERIA_SCOPE && NDVR_API >= 11, 'AC1: the upgrade added ndvr_criteria.scope_ids and the stored version reached V_CRITERIA_SCOPE (8); NDVR_API is 11 or later' );
 
 		$this->repo()->set_scope( $this->fx['fit'], array( $this->fx['shoes'] ) );
 		$old = static function () {

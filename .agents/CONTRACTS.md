@@ -367,3 +367,9 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   WPML/Polylang to the default language); `CriteriaRepository::canonical_terms()`, `listen()`, `has_scoped()`. `criteria_saved`
   fires from the repository (added, toggled on a status change, deleted, scoped). `criteria_handle_action` results other than
   true/WP_Error are failures. `required_columns()` includes `criteria.scope_ids`.
+- RR-21 (NDVR_API 12): service `integrity` = `Integrity\Scorer` (`score( $context )`, `save()`, static `holds( $comment_id )`,
+  `level()`, `levels()`, `signals()`, `rt_value()`, `rt_field()`, `rt_age()`, `shingles()`, `is_disposable()`). Comment meta
+  `_ndvr_risk`, `_ndvr_risk_reasons`, `_ndvr_risk_held`, `_ndvr_token_id`. `create()` keys `token_id`, `render_ts`; form field
+  `ndvr_rt`. Filters `risk_signals`, `risk_score`, `risk_levels`, `disposable_domains`, `similarity_threshold`; action
+  `review_risk_scored( $id, $score, $reasons, $held )`. Settings `integrity_enabled`, `integrity_hold_high` (true). Moderation
+  column `risk`, view `high_risk`. Transparency key `integrity`.

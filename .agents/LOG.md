@@ -936,3 +936,8 @@ EVIDENCE: rr-20 30/30; 16 mutations (14 caught, 2 equivalent); Pro rr-20p 14/14 
 - Review `.agents/prd/reviews/code-RR-20.md`: 0 blockers, 4 majors, 11 minors, 11 test gaps; decisions in PRD RR-20 rev 6.
   M4 (WPML/Polylang term ids) is from how those plugins store translations; covered with a mapping filter in the harness,
   a real multilingual site check is part of OC-11's release pass.
+
+## 2026-10-11 — RR-21 review integrity signals built → in_review
+- PRD rev 5 reconciled (line numbers, ReviewLength::count, Reports-style admin, Pro AI auto-publish gap → NDVR_API 12),
+  rev 6 as built. Disposable domains: a hand-picked list written for the plugin (no third-party list bundled).
+EVIDENCE: rr-21 24/24; AC13 17.4 ms/score (3,000 extra reviews, SQLite); Pro rr-14p 3/3; mutations run.

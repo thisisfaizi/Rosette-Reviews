@@ -265,6 +265,13 @@ final class Plugin {
 		);
 
 		$c->set(
+			'integrity',
+			static function ( $c ) {
+				return new \NdvReviews\Integrity\Scorer( $c->get( 'settings' ) );
+			}
+		);
+
+		$c->set(
 			'reports',
 			static function ( $c ) {
 				return new \NdvReviews\Reviews\Reports( $c->get( 'settings' ), $c->get( 'antispam' ) );
@@ -570,6 +577,7 @@ final class Plugin {
 			new \NdvReviews\Display\ReviewSearch(),
 			$this->container->get( 'votes' ),
 			$this->container->get( 'reports' ),
+			$this->container->get( 'integrity' ),
 			$this->container->get( 'review_edits' ),
 			$this->container->get( 'myaccount_reviews' ),
 			$this->container->get( 'pending_edits' ),

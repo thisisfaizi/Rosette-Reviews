@@ -167,13 +167,46 @@ class ReviewRepository {
 			return $validation;
 		}
 
+		$source = isset( $data['source'] ) ? sanitize_key( $data['source'] ) : 'onsite';
+		// Same as core comments: the submitter's IP aids spam moderation (erased by the GDPR eraser).
+		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? (string) preg_replace( '/[^0-9a-fA-F:., ]/', '', wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- stripped to IP characters, as core does.
+		// Verified before the insert: the integrity check reads it (same arguments as before).
+		$is_verified = $this->verified->is_verified( $email, $user_id, $product_id, $source );
+
+		// RR-21: score customer submissions after every rule has passed, and
+		// hold High-risk ones that a rule (Pro) would publish. Inline, so it
+		// runs after every should_approve callback and before the insert.
+		$integrity = \NdvReviews\Plugin::instance()->container()->get( 'integrity' );
+		$risk      = null;
+		$risk_held = false;
+		if ( $integrity->enabled() && Sources::is_interactive( $source ) ) {
+			$risk = $integrity->score(
+				array(
+					'content'   => $content,
+					'email'     => $email,
+					'ip'        => $ip,
+					'user_id'   => $user_id,
+					'pool_id'   => $pool_id,
+					'order_id'  => isset( $data['order_id'] ) ? absint( $data['order_id'] ) : 0,
+					'token_id'  => isset( $data['token_id'] ) ? absint( $data['token_id'] ) : 0,
+					'verified'  => $is_verified,
+					'render_ts' => isset( $data['render_ts'] ) && is_string( $data['render_ts'] ) ? $data['render_ts'] : '',
+				)
+			);
+			// Only a rule's approval is held: code that asks for approval itself
+			// (no form can) is trusted, as before.
+			if ( $approved && empty( $data['approved'] ) && $integrity->hold_high() && 'high' === $risk['level'] ) {
+				$approved  = 0;
+				$risk_held = true;
+			}
+		}
+
 		$commentdata = array(
 			'comment_post_ID'      => $pool_id,
 			'comment_author'       => $author,
 			'comment_author_email' => $email,
 			'comment_author_url'   => '',
-			// Same as core comments: the submitter's IP aids spam moderation (erased by the GDPR eraser).
-			'comment_author_IP'    => isset( $_SERVER['REMOTE_ADDR'] ) ? preg_replace( '/[^0-9a-fA-F:., ]/', '', wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- stripped to IP characters, as core does.
+			'comment_author_IP'    => $ip,
 			'comment_agent'        => isset( $_SERVER['HTTP_USER_AGENT'] ) ? substr( sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) ), 0, 254 ) : '',
 			'comment_content'      => $content,
 			'comment_type'         => 'review',
@@ -212,7 +245,6 @@ class ReviewRepository {
 			update_comment_meta( $comment_id, '_ndvr_title', sanitize_text_field( $data['title'] ) );
 		}
 
-		$source = isset( $data['source'] ) ? sanitize_key( $data['source'] ) : 'onsite';
 		update_comment_meta( $comment_id, '_ndvr_source', $source );
 
 		// Seed the helpful counter to 0 so unvoted reviews sort as 0 under "Most
@@ -227,6 +259,10 @@ class ReviewRepository {
 		if ( ! empty( $data['order_id'] ) ) {
 			update_comment_meta( $comment_id, '_ndvr_order_id', absint( $data['order_id'] ) );
 		}
+		// The landing token (RR-21: a customer's other reviews from the same link are siblings).
+		if ( ! empty( $data['token_id'] ) ) {
+			update_comment_meta( $comment_id, \NdvReviews\Integrity\Scorer::META_TOKEN, absint( $data['token_id'] ) );
+		}
 
 		// Stored on another product's pool: remember the product it was written
 		// for (the parent, for a variation), so it can move back if the
@@ -236,10 +272,12 @@ class ReviewRepository {
 			update_comment_meta( $comment_id, Pool::POOLED_FROM_META, $origin );
 		}
 
-		$is_verified = $this->verified->is_verified( $email, $user_id, $product_id, $source );
 		update_comment_meta( $comment_id, '_ndvr_verified', $is_verified ? 1 : 0 );
 		if ( $is_verified ) {
 			update_comment_meta( $comment_id, 'verified', 1 );
+		}
+		if ( null !== $risk ) {
+			$integrity->save( $comment_id, $risk, $risk_held );
 		}
 
 		// Compute caches (aggregate recalculated on the pool id). A plain overall

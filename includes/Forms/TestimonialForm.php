@@ -231,6 +231,7 @@ class TestimonialForm implements Registerable {
 
 					<p class="ndvr-hp" aria-hidden="true" style="position:absolute;left:-9999px;">
 						<input type="text" name="<?php echo esc_attr( AntiSpam::HONEYPOT ); ?>" tabindex="-1" autocomplete="off" />
+						<?php echo \NdvReviews\Integrity\Scorer::rt_field(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in rt_field(). ?>
 					</p>
 
 					<?php if ( in_array( $captcha, array( 'turnstile', 'hcaptcha' ), true ) ) : ?>
@@ -342,6 +343,7 @@ class TestimonialForm implements Registerable {
 				'answers_present' => $present,
 				'consent'         => true,
 				'approved'        => 0,
+				'render_ts'       => isset( $input['ndvr_rt'] ) && is_string( $input['ndvr_rt'] ) ? $input['ndvr_rt'] : '',
 			)
 		);
 
