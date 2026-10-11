@@ -183,6 +183,7 @@ class ReviewRepository {
 			$risk = $integrity->score(
 				array(
 					'content'   => $content,
+					'title'     => isset( $data['title'] ) ? sanitize_text_field( (string) $data['title'] ) : '',
 					'email'     => $email,
 					'ip'        => $ip,
 					'user_id'   => $user_id,

@@ -941,3 +941,10 @@ EVIDENCE: rr-20 30/30; 16 mutations (14 caught, 2 equivalent); Pro rr-20p 14/14 
 - PRD rev 5 reconciled (line numbers, ReviewLength::count, Reports-style admin, Pro AI auto-publish gap → NDVR_API 12),
   rev 6 as built. Disposable domains: a hand-picked list written for the plugin (no third-party list bundled).
 EVIDENCE: rr-21 24/24; AC13 17.4 ms/score (3,000 extra reviews, SQLite); Pro rr-14p 3/3; mutations run.
+
+## 2026-10-11 — RR-21 code review fixed → done
+- Review `prd/reviews/code-RR-21.md`: B1/B2 (settings card read its argument as the settings array and never marked
+  `integrity_hold_high`, so unticking the hold was not saved), M1 distinct links in title + plain text, M2 proxy/real-IP
+  help (card + readme), M3 Pro auto-approve help follows `hold_high()`; minors m1–m4, m6–m11, m13, m14 in code, m5/m12
+  in the PRD (rev 7). The harness short-circuits mail (the QA machine has no mail server: 2 s per send).
+EVIDENCE: rr-21 50/50 (T1–T11 added); Pro rr-14p 4/4 (T12); mutations 27/27 killed (one survivor, the view's risk_pending filter, got a test).

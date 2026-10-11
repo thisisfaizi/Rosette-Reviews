@@ -372,4 +372,5 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   `_ndvr_risk`, `_ndvr_risk_reasons`, `_ndvr_risk_held`, `_ndvr_token_id`. `create()` keys `token_id`, `render_ts`; form field
   `ndvr_rt`. Filters `risk_signals`, `risk_score`, `risk_levels`, `disposable_domains`, `similarity_threshold`; action
   `review_risk_scored( $id, $score, $reasons, $held )`. Settings `integrity_enabled`, `integrity_hold_high` (true). Moderation
-  column `risk`, view `high_risk`. Transparency key `integrity`.
+  column `risk`, view `high_risk` (`&risk_pending=1` lists only pending). Transparency key `integrity`. Rev 7: static
+  `count_links( $text )`, `forget_counts()`; the scorer context takes `title`; transient `ndvr_risk_counts` (5 min).

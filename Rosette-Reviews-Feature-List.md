@@ -92,6 +92,8 @@ Free:
   screen, Dismiss; optional hold after N reports from signed-in shoppers or buyers (off by default, never by rating).
 - My Account → Reviews: products waiting for a review, own reviews with status; edit within a window (30 days
   default); published reviews change only after the store applies the edit; "Edited" label; discard for non-rating reasons.
+- Review integrity checks: local risk score (bursts by IP/email, copied text, signed form time, short text, new
+  account, disposable email, links, unverified); never the rating; Risk column, High risk view, hold before auto-approve.
 - Review search in the reviews tab (products with 10+ reviews): text and titles only, highlighted, announced, with filters,
   works without JS.
 

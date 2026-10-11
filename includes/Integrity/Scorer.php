@@ -22,14 +22,15 @@ defined( 'ABSPATH' ) || exit;
  */
 class Scorer implements Registerable {
 
-	const META_SCORE   = '_ndvr_risk';
-	const META_REASONS = '_ndvr_risk_reasons';
-	const META_HELD    = '_ndvr_risk_held';
-	const META_TOKEN   = '_ndvr_token_id';
-	const VIEW         = 'high_risk';
-	const RT_FIELD     = 'ndvr_rt';
-	const CANDIDATES   = 50;
-	const MIN_WORDS    = 8;
+	const META_SCORE       = '_ndvr_risk';
+	const META_REASONS     = '_ndvr_risk_reasons';
+	const META_HELD        = '_ndvr_risk_held';
+	const META_TOKEN       = '_ndvr_token_id';
+	const VIEW             = 'high_risk';
+	const RT_FIELD         = 'ndvr_rt';
+	const CANDIDATES       = 50;
+	const MIN_WORDS        = 8;
+	const COUNTS_TRANSIENT = 'ndvr_risk_counts';
 
 	/**
 	 * Settings accessor.
@@ -61,6 +62,9 @@ class Scorer implements Registerable {
 		add_action( 'ndv-reviews/dashboard/after_kpis', array( $this, 'dashboard_chip' ) );
 		add_filter( 'ndv-reviews/transparency_sentences', array( $this, 'transparency' ) );
 		add_filter( 'wp_privacy_personal_data_exporters', array( $this, 'register_exporter' ) );
+		add_action( 'ndv-reviews/review_risk_scored', array( __CLASS__, 'forget_counts' ) );
+		add_action( 'transition_comment_status', array( __CLASS__, 'forget_counts' ) );
+		add_action( 'deleted_comment', array( __CLASS__, 'forget_counts' ) );
 	}
 
 	// ── Settings ─────────────────────────────────────────────────────────
@@ -97,19 +101,23 @@ class Scorer implements Registerable {
 	/**
 	 * The "Integrity" group on the card.
 	 *
-	 * @param array<string,mixed> $values Current settings.
+	 * @param mixed $value The integrity_enabled value (unused: both settings are read here).
 	 * @return void
 	 */
-	public function render_settings( $values ) {
-		$values = (array) $values;
-		$on     = ! array_key_exists( 'integrity_enabled', $values ) || ! empty( $values['integrity_enabled'] );
-		$hold   = ! array_key_exists( 'integrity_hold_high', $values ) || ! empty( $values['integrity_hold_high'] );
+	public function render_settings( $value ) {
+		unset( $value );
+		$on   = $this->enabled();
+		$hold = (bool) $this->settings->get( 'integrity_hold_high', true );
+		// integrity_hold_high has no render callback of its own (it is printed
+		// here), so its "rendered on this form" marker is printed here too.
+		\NdvReviews\Admin\SettingsFields::marker( 'integrity_hold_high' );
 		?>
 		<fieldset class="ndvr-settings-group" aria-describedby="ndvr-integrity-note">
 			<legend><strong><?php esc_html_e( 'Integrity', 'rosette-reviews' ); ?></strong></legend>
 			<p><label><input type="checkbox" name="integrity_enabled" value="1" <?php checked( $on ); ?> /> <?php esc_html_e( 'Check new reviews for signs of fake reviews', 'rosette-reviews' ); ?></label></p>
 			<p><label><input type="checkbox" name="integrity_hold_high" value="1" <?php checked( $hold ); ?> /> <?php esc_html_e( 'Hold high-risk reviews for checking, even when a rule would publish them', 'rosette-reviews' ); ?></label></p>
 			<p class="description" id="ndvr-integrity-note"><?php esc_html_e( 'Checks run on your server and nothing is sent anywhere. The star rating is never part of the check. A high score is a reason to look, not proof.', 'rosette-reviews' ); ?></p>
+			<p class="description"><?php esc_html_e( 'If your site is behind a proxy or CDN, make sure WordPress sees each visitor\'s own IP address, or many customers will look like one connection.', 'rosette-reviews' ); ?></p>
 		</fieldset>
 		<?php
 	}
@@ -214,7 +222,8 @@ class Scorer implements Registerable {
 		unset( $context['rating'], $context['criteria'] );
 
 		$content = isset( $context['content'] ) ? (string) $context['content'] : '';
-		$email   = strtolower( isset( $context['email'] ) ? (string) $context['email'] : '' );
+		$email   = isset( $context['email'] ) ? (string) $context['email'] : '';
+		$pool    = isset( $context['pool_id'] ) ? (int) $context['pool_id'] : 0;
 		$ip      = isset( $context['ip'] ) ? (string) $context['ip'] : '';
 		$user_id = isset( $context['user_id'] ) ? (int) $context['user_id'] : 0;
 		$me      = array(
@@ -225,7 +234,8 @@ class Scorer implements Registerable {
 		);
 		$reasons = array();
 
-		if ( ! $me['verified'] ) {
+		// Only products can be verified purchases (not testimonials on pages).
+		if ( ! $me['verified'] && $pool && 'product' === get_post_type( $pool ) ) {
 			$reasons['unverified'] = 1;
 		}
 		if ( '' !== $ip ) {
@@ -240,7 +250,7 @@ class Scorer implements Registerable {
 				$reasons['email_burst'] = $n + 1;
 			}
 		}
-		$twin = $this->similar_to( $content, isset( $context['pool_id'] ) ? (int) $context['pool_id'] : 0, $me );
+		$twin = $this->similar_to( $content, $pool, $me );
 		if ( $twin ) {
 			$reasons['similar'] = $twin;
 		}
@@ -253,14 +263,17 @@ class Scorer implements Registerable {
 		}
 		if ( $user_id > 0 ) {
 			$user = get_userdata( $user_id );
-			if ( $user && time() - (int) strtotime( $user->user_registered . ' UTC' ) < HOUR_IN_SECONDS ) {
+			$born = $user ? (int) strtotime( $user->user_registered . ' UTC' ) : 0;
+			// An empty or unparsable date (some importers) is not "new".
+			$alive = time() - $born;
+			if ( $born > 0 && $alive >= 0 && $alive < HOUR_IN_SECONDS ) {
 				$reasons['new_account'] = 1;
 			}
 		}
-		if ( self::is_disposable( $email ) ) {
+		if ( self::is_disposable( strtolower( $email ) ) ) {
 			$reasons['disposable_email'] = 1;
 		}
-		$links = (int) preg_match_all( '#(?:https?://|www\.)#i', $content );
+		$links = self::count_links( ( isset( $context['title'] ) ? (string) $context['title'] . ' ' : '' ) . $content );
 		if ( $links >= 2 ) {
 			$reasons['links'] = $links;
 		}
@@ -286,6 +299,32 @@ class Scorer implements Registerable {
 			'level'   => self::level( $score ),
 			'reasons' => $reasons,
 		);
+	}
+
+	/**
+	 * Distinct links in text: each URL once (https://www.… is one link, and a
+	 * link whose text is its own address is one link).
+	 *
+	 * @param string $text Text (HTML allowed).
+	 * @return int
+	 */
+	public static function count_links( $text ) {
+		$text = (string) $text;
+		$urls = array();
+		if ( preg_match_all( '#href\s*=\s*["\']([^"\']+)["\']#i', $text, $m ) ) {
+			$urls = $m[1];
+		}
+		if ( preg_match_all( '#\b(?:https?://|www\.)[^\s<>"\']+#i', wp_strip_all_tags( $text ), $m ) ) {
+			$urls = array_merge( $urls, $m[0] );
+		}
+		$seen = array();
+		foreach ( $urls as $url ) {
+			$key          = strtolower( rtrim( (string) preg_replace( '#^(?:https?://)?(?:www\.)?#i', '', trim( $url ) ), '/.,;:!?)' ) );
+			$seen[ $key ] = true;
+		}
+		unset( $seen[''] );
+
+		return count( $seen );
 	}
 
 	/**
@@ -317,6 +356,9 @@ class Scorer implements Registerable {
 	private function without_siblings( array $rows, array $me ) {
 		if ( ! $rows ) {
 			return array();
+		}
+		if ( ! $me['order_id'] && ! $me['token_id'] && ! ( $me['user_id'] && $me['verified'] ) ) {
+			return $rows; // No sibling rule can apply.
 		}
 		update_meta_cache( 'comment', array_map( 'intval', wp_list_pluck( $rows, 'comment_ID' ) ) );
 		$out = array();
@@ -395,9 +437,23 @@ class Scorer implements Registerable {
 	public static function shingles( $text ) {
 		$text  = html_entity_decode( wp_strip_all_tags( (string) $text ), ENT_QUOTES, 'UTF-8' );
 		$text  = mb_strtolower( $text, 'UTF-8' );
-		$text  = (string) preg_replace( '/[^\p{L}\p{N}]+/u', ' ', $text );
+		$text  = (string) preg_replace( '/[^\p{L}\p{M}\p{N}]+/u', ' ', $text );
 		$text  = trim( mb_substr( trim( $text ), 0, 500, 'UTF-8' ) );
 		$words = '' === $text ? array() : explode( ' ', $text );
+		// Scripts written without spaces (Chinese, Japanese, Thai): character
+		// 3-grams over at least 20 characters instead of words.
+		if ( count( $words ) < self::MIN_WORDS && preg_match( '/[\p{Han}\p{Hiragana}\p{Katakana}\p{Thai}\p{Lao}\p{Khmer}\p{Myanmar}]/u', $text ) ) {
+			$chars = preg_split( '//u', str_replace( ' ', '', $text ), -1, PREG_SPLIT_NO_EMPTY );
+			$total = is_array( $chars ) ? count( $chars ) : 0;
+			if ( $total < 20 ) {
+				return array();
+			}
+			$out = array();
+			for ( $i = 0; $i + 2 < $total; $i++ ) {
+				$out[ $chars[ $i ] . $chars[ $i + 1 ] . $chars[ $i + 2 ] ] = true;
+			}
+			return $out;
+		}
 		if ( count( $words ) < self::MIN_WORDS ) {
 			return array();
 		}
@@ -630,7 +686,8 @@ class Scorer implements Registerable {
 			'count'      => array( $this, 'high_total' ),
 			'query_args' => static function ( $args ) {
 				$args               = (array) $args;
-				$args['status']     = 'all';
+				// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- a list filter.
+				$args['status']     = isset( $_GET['risk_pending'] ) ? 'hold' : 'all';
 				$args['meta_query'] = array_merge( isset( $args['meta_query'] ) ? (array) $args['meta_query'] : array(), array( self::high_clause() ) ); // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
 
 				return $args;
@@ -662,9 +719,26 @@ class Scorer implements Registerable {
 	 */
 	public function high_total( $pending_only = false ) {
 		global $wpdb;
-		$approved = $pending_only ? " AND c.comment_approved = '0'" : " AND c.comment_approved IN ('0','1')";
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $approved is a literal.
-		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->commentmeta} m INNER JOIN {$wpdb->comments} c ON c.comment_ID = m.comment_id WHERE m.meta_key = %s AND CAST(m.meta_value AS SIGNED) >= %d{$approved}", self::META_SCORE, self::levels()['high'] ) );
+		$key    = $pending_only ? 'pending' : 'all';
+		$counts = get_transient( self::COUNTS_TRANSIENT );
+		$counts = is_array( $counts ) ? $counts : array();
+		if ( ! isset( $counts[ $key ] ) ) {
+			$approved = $pending_only ? " AND c.comment_approved = '0'" : " AND c.comment_approved IN ('0','1')";
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $approved is a literal.
+			$counts[ $key ] = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->commentmeta} m INNER JOIN {$wpdb->comments} c ON c.comment_ID = m.comment_id WHERE m.meta_key = %s AND CAST(m.meta_value AS SIGNED) >= %d{$approved}", self::META_SCORE, self::levels()['high'] ) );
+			set_transient( self::COUNTS_TRANSIENT, $counts, 5 * MINUTE_IN_SECONDS );
+		}
+
+		return (int) $counts[ $key ];
+	}
+
+	/**
+	 * Forget the cached counts (a review was scored, moderated or deleted).
+	 *
+	 * @return void
+	 */
+	public static function forget_counts() {
+		delete_transient( self::COUNTS_TRANSIENT );
 	}
 
 	/**
@@ -713,7 +787,10 @@ class Scorer implements Registerable {
 			return $pill;
 		}
 
-		return $pill . '<details class="ndvr-risk-reasons"><summary>' . esc_html__( 'Why', 'rosette-reviews' ) . '</summary><ul><li>' . implode( '</li><li>', self::reason_lines( $reasons ) ) . '</li></ul></details>';
+		/* translators: %s: reviewer's name. */
+		$who = '<span class="screen-reader-text"> ' . esc_html( sprintf( __( '(risk signals for the review by %s)', 'rosette-reviews' ), (string) $item->comment_author ) ) . '</span>';
+
+		return $pill . '<details class="ndvr-risk-reasons"><summary>' . esc_html__( 'Why', 'rosette-reviews' ) . $who . '</summary><ul><li>' . implode( '</li><li>', self::reason_lines( $reasons ) ) . '</li></ul></details>';
 	}
 
 	/**
@@ -773,8 +850,9 @@ class Scorer implements Registerable {
 			esc_url(
 				add_query_arg(
 					array(
-						'page'   => ModerationPage::PAGE_SLUG,
-						'status' => self::VIEW,
+						'page'         => ModerationPage::PAGE_SLUG,
+						'status'       => self::VIEW,
+						'risk_pending' => 1,
 					),
 					admin_url( 'admin.php' )
 				)

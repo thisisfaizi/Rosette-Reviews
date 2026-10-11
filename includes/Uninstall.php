@@ -56,6 +56,7 @@ final class Uninstall {
 				'ndvr_upgrade_backoff',
 				'ndvr_recover_checked',
 				'ndvr_tp_import',
+				'ndvr_risk_counts', // RR-21.
 			),
 			'transient_prefixes'    => array(
 				'ndvr_rl_',
@@ -63,6 +64,10 @@ final class Uninstall {
 				'ndvr_order_action_notice_',
 			),
 			'comment_meta'          => array(
+				'_ndvr_risk',
+				'_ndvr_risk_reasons',
+				'_ndvr_risk_held',
+				'_ndvr_token_id',
 				'_ndvr_overall_rating',
 				'_ndvr_source',
 				'_ndvr_verified',

@@ -1,6 +1,6 @@
 <?php
 /**
- * RR-21: review integrity signals (PRD rev 5, AC1–AC17).
+ * RR-21: review integrity signals (PRD rev 7, AC1–AC17, code review T1–T11).
  *
  *     php -d memory_limit=512M boot.php run <free>/.agents/qa/rr-21.php 1   (QA site, D:/.devcache/qa-site)
  *
@@ -16,6 +16,11 @@
 use NdvReviews\Integrity\Scorer;
 
 defined( 'ABSPATH' ) || exit;
+
+/**
+ * Stops an AJAX handler.
+ */
+final class NDVR_QA_21_Die extends \Exception {}
 
 /**
  * The harness.
@@ -83,6 +88,16 @@ final class NDVR_QA_RR21 {
 			$this->ac14();
 			$this->ac15();
 			$this->ac16();
+			$this->t1_settings();
+			$this->t2_email_burst();
+			$this->t3_new_account();
+			$this->t4_siblings();
+			$this->t5_links();
+			$this->t6_boundaries();
+			$this->t7_candidates();
+			$this->t8_handlers();
+			$this->t10_holds();
+			$this->t11_edits_export();
 			$this->ac13();
 		} catch ( \Throwable $e ) {
 			$this->ok( false, 'uncaught ' . get_class( $e ) . ': ' . $e->getMessage() . ' @ ' . basename( $e->getFile() ) . ':' . $e->getLine() );
@@ -110,6 +125,8 @@ final class NDVR_QA_RR21 {
 	 * @return void
 	 */
 	private function setup() {
+		// No mail is under test here; the QA machine has no mail server (2 s per send).
+		add_filter( 'pre_wp_mail', '__return_true' );
 		$this->net   = wp_rand( 22, 250 );
 		$this->saved = get_option( NDVR_OPTION_SETTINGS, null );
 		$this->settings(
@@ -152,6 +169,7 @@ final class NDVR_QA_RR21 {
 		$_POST    = array();
 		$_REQUEST = array();
 		wp_set_current_user( 1 );
+		remove_filter( 'pre_wp_mail', '__return_true' );
 	}
 
 	// ------------------------------------------------------------------ ACs
@@ -346,6 +364,8 @@ final class NDVR_QA_RR21 {
 			)
 		);
 		$this->fx['comments'][] = $direct;
+		$this->fx['direct']     = $direct;
+		$this->fx['import']     = $import;
 		$this->ok( '' === (string) get_comment_meta( $import, Scorer::META_SCORE, true ) && '' === (string) get_comment_meta( $direct, Scorer::META_SCORE, true ), 'AC10: an import and a direct insert are not scored' );
 
 		$called = 0;
@@ -394,6 +414,10 @@ final class NDVR_QA_RR21 {
 		$expect = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->commentmeta} m INNER JOIN {$wpdb->comments} c ON c.comment_ID = m.comment_id WHERE m.meta_key = %s AND CAST(m.meta_value AS SIGNED) >= 60 AND c.comment_approved IN ('0','1')", Scorer::META_SCORE ) );
 		$views  = $s->moderation_view( array() );
 		$args   = call_user_func( $views[ Scorer::VIEW ]['query_args'], array() );
+		$_GET['risk_pending'] = '1';
+		$pend_args             = call_user_func( $views[ Scorer::VIEW ]['query_args'], array() );
+		unset( $_GET['risk_pending'] );
+		$this->ok( 'all' === $args['status'] && 'hold' === $pend_args['status'], 'AC14: the High risk view lists every status, and only pending ones from the chip link (risk_pending)' );
 		$q      = get_comments( $args + array( 'count' => true, 'type__in' => array( 'review', 'comment' ), 'post_type' => \NdvReviews\Reviews\PostTypes::all() ) );
 		$this->ok( $expect > 0 && $expect === $s->high_total() && (int) $q === $expect, 'AC14: the High risk view lists exactly the reviews scored 60 or more (' . $expect . ')' );
 		$high = $this->fx['high'] ?? 0;
@@ -406,7 +430,40 @@ final class NDVR_QA_RR21 {
 		$html = $s->column_html( '', get_comment( $high ) );
 		$this->ok( false !== strpos( $html, 'ndvr-risk-pill is-high' ) && false !== strpos( $html, '<details class="ndvr-risk-reasons">' ) && false !== strpos( $html, 'Text matches review #' ), 'AC14: the column shows the High pill with the score and the reasons (with the review link)' );
 		$cols = $s->moderation_column( array( 'author' => 'Author', 'date' => 'Date' ) );
-		$this->ok( array( 'author', 'risk', 'date' ) === array_keys( $cols ) && false !== strpos( $s->column_html( '', get_comment( $this->fx['direct'] ?? $this->fx['comments'][0] ) ), '' ), 'AC14: the Risk column sits before the date' );
+		$this->ok( array( 'author', 'risk', 'date' ) === array_keys( $cols ) && false !== strpos( $s->column_html( '', get_comment( $this->fx['direct'] ) ), 'Not checked' ), 'AC14: the Risk column sits before the date; an unchecked review shows "Not checked"' );
+
+		$pending = (int) get_comments(
+			array(
+				'count'      => true,
+				'status'     => 'hold',
+				'type__in'   => array( 'review', 'comment' ),
+				'post_type'  => \NdvReviews\Reviews\PostTypes::all(),
+				'meta_query' => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+					array(
+						'key'     => Scorer::META_SCORE,
+						'value'   => 60,
+						'compare' => '>=',
+						'type'    => 'NUMERIC',
+					),
+				),
+			)
+		);
+		ob_start();
+		$s->dashboard_chip();
+		$chip = (string) ob_get_clean();
+		$this->ok( $pending > 0 && $pending === $s->high_total( true ) && false !== strpos( $chip, 'High-risk reviews waiting: ' . number_format_i18n( $pending ) ) && false !== strpos( $chip, 'risk_pending=1' ), 'AC14: the pending count (' . $pending . ') and the dashboard chip, which opens the pending ones' );
+
+		$waiting = 0;
+		foreach ( $this->fx['comments'] as $cid ) {
+			if ( '0' === (string) get_comment( $cid )->comment_approved && 'high' === Scorer::level( (int) get_comment_meta( $cid, Scorer::META_SCORE, true ) ) ) {
+				$waiting = $cid;
+				break;
+			}
+		}
+		wp_set_comment_status( $waiting, 'approve' );
+		$after = $s->high_total( true );
+		wp_set_comment_status( $waiting, 'hold' );
+		$this->ok( $waiting && $pending - 1 === $after && $pending === $s->high_total( true ), 'AC14: the cached counts follow moderation (approve, then hold again)' );
 	}
 
 	/**
@@ -447,14 +504,436 @@ final class NDVR_QA_RR21 {
 	 * @return void
 	 */
 	private function ac16() {
-		$s   = $this->c()->get( 'integrity' );
-		$on  = $s->transparency( array() );
+		$t   = $this->c()->get( 'transparency' );
+		$on  = $t->sentences( 0 );
 		$this->settings( array( 'integrity_hold_high' => false ) );
-		$off = $s->transparency( array() );
-		$this->settings( array( 'integrity_hold_high' => true ) );
-		$this->ok( 'We check new reviews for signs of fake reviews, such as many reviews from one connection in a day. A review that shows several signs waits for a person to check it before it appears. The star rating is never part of this check.' === ( $on['integrity'] ?? '' ) && ! isset( $off['integrity'] ) && ! has_filter( 'ndv-reviews/should_approve', '__return_true' ), 'AC16: the integrity sentence is exactly the canonical text, only while both settings are on' );
+		$off = $t->sentences( 0 );
+		$this->settings(
+			array(
+				'integrity_hold_high' => true,
+				'integrity_enabled'   => false,
+			)
+		);
+		$dis = $t->sentences( 0 );
+		$this->settings( array( 'integrity_enabled' => true ) );
+		$this->ok( 'We check new reviews for signs of fake reviews, such as many reviews from one connection in a day. A review that shows several signs waits for a person to check it before it appears. The star rating is never part of this check.' === ( $on['integrity'] ?? '' ) && ! isset( $off['integrity'] ) && ! isset( $dis['integrity'] ), 'AC16: the transparency notice has the canonical integrity sentence only while the checks and the hold are both on' );
 	}
 
+	// ------------------------------------------------------- review tests
+
+	/**
+	 * T1: the settings card round-trip (code review B1, B2).
+	 *
+	 * @return void
+	 */
+	private function t1_settings() {
+		$marker = \NdvReviews\Admin\SettingsFields::MARKER;
+		$this->settings(
+			array(
+				'integrity_enabled'   => true,
+				'integrity_hold_high' => false,
+			)
+		);
+		ob_start();
+		\NdvReviews\Admin\SettingsFields::render_card_fields( 'settings', 'trust', (array) get_option( NDVR_OPTION_SETTINGS, array() ) );
+		$html = (string) ob_get_clean();
+		preg_match_all( '#name="' . preg_quote( $marker, '#' ) . '\[\]" value="([a-z0-9_]+)"#', $html, $m );
+		$markers = $m[1];
+		$on      = (bool) preg_match( '#name="integrity_enabled" value="1"\s+checked#', $html );
+		$hold    = (bool) preg_match( '#name="integrity_hold_high" value="1"\s+checked#', $html );
+		$this->ok( $on && ! $hold && in_array( 'integrity_enabled', $markers, true ) && in_array( 'integrity_hold_high', $markers, true ), 'T1: the card shows the stored values (checks on, hold off) and marks both fields as on the form' );
+
+		$off  = \NdvReviews\Admin\SettingsFields::sanitize_page( 'settings', array( $marker => $markers ) );
+		$both = \NdvReviews\Admin\SettingsFields::sanitize_page(
+			'settings',
+			array(
+				$marker               => $markers,
+				'integrity_enabled'   => '1',
+				'integrity_hold_high' => '1',
+			)
+		);
+		$this->ok( array_key_exists( 'integrity_enabled', $off ) && array_key_exists( 'integrity_hold_high', $off ) && false === $off['integrity_enabled'] && false === $off['integrity_hold_high'] && true === $both['integrity_enabled'] && true === $both['integrity_hold_high'], 'T1: posting the card with both boxes unticked saves both off; ticked saves both on' );
+		$this->settings(
+			array(
+				'integrity_enabled'   => true,
+				'integrity_hold_high' => true,
+			)
+		);
+	}
+
+	/**
+	 * T2: email_burst.
+	 *
+	 * @return void
+	 */
+	private function t2_email_burst() {
+		$email = 'rr21-eb-' . wp_generate_password( 5, false, false ) . '@example.invalid';
+		$ids   = array();
+		for ( $i = 1; $i <= 3; $i++ ) {
+			$ids[] = $this->create( $this->fx[ 'p' . $i ], array( 'email' => $email ), $this->ip( 60 + $i ), $this->words( 30, 'eb' . $i ) );
+		}
+		$second = (array) get_comment_meta( $ids[1], Scorer::META_REASONS, true );
+		$third  = (array) get_comment_meta( $ids[2], Scorer::META_REASONS, true );
+		$this->ok( ! isset( $second['email_burst'] ) && 3 === ( $third['email_burst'] ?? 0 ) && ! isset( $third['ip_burst'] ), 'T2: the third unverified review from one email (three IPs) has email_burst 3; the second has none' );
+	}
+
+	/**
+	 * T3: new_account.
+	 *
+	 * @return void
+	 */
+	private function t3_new_account() {
+		$s   = $this->c()->get( 'integrity' );
+		$got = array();
+		foreach (
+			array(
+				'new'    => 10 * MINUTE_IN_SECONDS,
+				'old'    => 2 * HOUR_IN_SECONDS,
+				'future' => -10 * MINUTE_IN_SECONDS,
+			) as $k => $ago
+		) {
+			$r         = $s->score(
+				array(
+					'content'  => $this->words( 30, 'na' . $k ),
+					'user_id'  => $this->user( $ago ),
+					'verified' => true,
+				)
+			);
+			$got[ $k ] = isset( $r['reasons']['new_account'] );
+		}
+		$this->ok( $got['new'] && ! $got['old'] && ! $got['future'], 'T3: new_account fires for an account 10 minutes old, not for one 2 hours old or dated in the future' );
+	}
+
+	/**
+	 * T4: the order sibling rule, and a verified buyer's unverified reviews.
+	 *
+	 * @return void
+	 */
+	private function t4_siblings() {
+		$ip    = $this->ip( 70 );
+		$order = 880000 + $this->net;
+		$ids   = array();
+		for ( $i = 1; $i <= 3; $i++ ) {
+			$ids[] = $this->create(
+				$this->fx[ 'p' . $i ],
+				array(
+					'order_id' => $order,
+					'token_id' => 660000 + $this->net * 10 + $i,
+				),
+				$ip,
+				$this->words( 30, 'os' . $i )
+			);
+		}
+		$r = (array) get_comment_meta( $ids[2], Scorer::META_REASONS, true );
+		$this->ok( 3 === count( array_filter( $ids ) ) && ! isset( $r['ip_burst'] ), 'T4: three guest reviews from one order (different tokens and emails, one IP) are siblings: no ip_burst' );
+
+		$u  = $this->buyer( array( $this->fx['p1'] ) );
+		$ip = $this->ip( 71 );
+		$this->create( $this->fx['p3'], array( 'user_id' => $u ), $ip, $this->words( 30, 'vu1' ) );
+		$this->create( $this->fx['p4'], array( 'user_id' => $u ), $ip, $this->words( 30, 'vu2' ) );
+		$id = $this->create( $this->fx['p1'], array( 'user_id' => $u ), $ip, $this->words( 30, 'vu3' ) );
+		$r  = (array) get_comment_meta( $id, Scorer::META_REASONS, true );
+		$this->ok( 3 === ( $r['ip_burst'] ?? 0 ) && ! isset( $r['unverified'] ), 'T4: a verified buyer\'s two earlier unverified reviews from the same IP still count (ip_burst 3)' );
+	}
+
+	/**
+	 * T5: link forms (code review M1) and the title.
+	 *
+	 * @return void
+	 */
+	private function t5_links() {
+		$s    = $this->c()->get( 'integrity' );
+		$tail = ' for more about this lovely product that I bought last week';
+		$www  = $s->score( array( 'content' => 'See https://www.example.com' . $tail ) );
+		$a    = $s->score( array( 'content' => 'See <a href="https://example.com">https://example.com</a>' . $tail ) );
+		$two  = $s->score( array( 'content' => 'See <a href="https://a.example">here</a> and www.b.example' . $tail ) );
+		$tit  = $s->score(
+			array(
+				'title'   => 'Visit www.a.example',
+				'content' => 'See https://b.example' . $tail,
+			)
+		);
+		$this->ok( ! isset( $www['reasons']['links'] ) && ! isset( $a['reasons']['links'] ) && 2 === ( $two['reasons']['links'] ?? 0 ) && 2 === ( $tit['reasons']['links'] ?? 0 ), 'T5: https://www.… is one link and a link showing its own address is one; a link and a different address are two; the title counts' );
+
+		$id = $this->create( $this->fx['p2'], array( 'title' => 'Visit www.a.example' ), $this->ip( 95 ), 'See https://b.example' . $tail . ' ' . $this->words( 10, 'tt' ) );
+		$r  = (array) get_comment_meta( $id, Scorer::META_REASONS, true );
+		$this->ok( 2 === ( $r['links'] ?? 0 ), 'T5: a submitted title reaches the check (a link in the title and one in the text)' );
+
+		$page                   = (int) wp_insert_post(
+			array(
+				'post_type'   => 'page',
+				'post_status' => 'publish',
+				'post_title'  => 'RR21 testimonials',
+			)
+		);
+		$this->fx['products'][] = $page;
+		$on_page                = $s->score(
+			array(
+				'content' => $this->words( 30, 'pg' ),
+				'pool_id' => $page,
+			)
+		);
+		$on_product             = $s->score(
+			array(
+				'content' => $this->words( 30, 'pg' ),
+				'pool_id' => $this->fx['p2'],
+			)
+		);
+		$this->ok( ! isset( $on_page['reasons']['unverified'] ) && isset( $on_product['reasons']['unverified'] ), 'T5: "not a verified buyer" applies on products, not to a testimonial on a page' );	}
+
+	/**
+	 * T6: boundaries.
+	 *
+	 * @return void
+	 */
+	private function t6_boundaries() {
+		$this->ok( 'high' === Scorer::level( 60 ) && 'medium' === Scorer::level( 59 ) && 'medium' === Scorer::level( 30 ) && 'low' === Scorer::level( 29 ), 'T6: 60 is High, 59 and 30 are Medium, 29 is Low' );
+
+		$s    = $this->c()->get( 'integrity' );
+		$base = array(
+			'content'  => $this->words( 30, 'tb' ),
+			'verified' => true,
+		);
+		$ok   = false;
+		for ( $try = 0; $try < 3 && ! $ok; $try++ ) {
+			$f14 = $s->score( $base + array( 'render_ts' => Scorer::rt_value( time() - 14 ) ) );
+			$f15 = $s->score( $base + array( 'render_ts' => Scorer::rt_value( time() - 15 ) ) );
+			$ok  = 14 === ( $f14['reasons']['fast'] ?? null ) && ! isset( $f15['reasons']['fast'] );
+		}
+		$this->ok( $ok && null === Scorer::rt_age( Scorer::rt_value( time() + 120 ) ), 'T6: 14 seconds is fast and 15 is not; a signed time in the future is ignored' );
+
+		$seven = $this->words( 7, 'mw' );
+		$eight = $this->words( 8, 'mw' );
+		$han   = '';
+		for ( $i = 0; $i < 20; $i++ ) {
+			$han .= mb_chr( 0x4E00 + $i * 7, 'UTF-8' );
+		}
+		$mark = Scorer::shingles( "cafe\u{0301} one two three four five six seven" );
+		$this->ok( array() === Scorer::shingles( $seven ) && 6 === count( Scorer::shingles( $eight ) ) && 18 === count( Scorer::shingles( $han ) ) && array() === Scorer::shingles( mb_substr( $han, 0, 19, 'UTF-8' ) ) && isset( $mark[ "cafe\u{0301} one two" ] ), 'T6: 7 words give no shingles and 8 give 6; 20 Chinese characters give 18 character shingles and 19 give none; a combining accent stays in its word' );
+
+		// The similarity threshold: exactly the pair's Jaccard matches, a hair above doesn't.
+		$text  = $this->words( 20, 'jac' . $this->net );
+		$words = explode( ' ', $text );
+		$orig  = $this->create( $this->fx['p4'], array(), $this->ip( 90 ), $text );
+		$words[19] = 'zzqq' . $this->net;
+		$copy  = implode( ' ', $words );
+		$mine  = Scorer::shingles( $copy );
+		$their = Scorer::shingles( $text );
+		$jac   = count( array_intersect_key( $mine, $their ) ) / count( $mine + $their );
+		$found = array();
+		foreach ( array( 'at' => $jac, 'above' => $jac + 0.001 ) as $k => $t ) {
+			$cb          = static function () use ( $t ) {
+				return $t;
+			};
+			add_filter( 'ndv-reviews/similarity_threshold', $cb );
+			$r           = $s->score(
+				array(
+					'content' => $copy,
+					'pool_id' => $this->fx['p4'],
+				)
+			);
+			$found[ $k ] = $r['reasons']['similar'] ?? 0;
+			remove_filter( 'ndv-reviews/similarity_threshold', $cb );
+		}
+		$this->ok( $orig && $found['at'] === $orig && 0 === $found['above'], sprintf( 'T6: a copy with similarity %.3f matches at exactly that threshold and not just above it', $jac ) );
+	}
+
+	/**
+	 * T7: the pool query and the spam exclusion.
+	 *
+	 * @return void
+	 */
+	private function t7_candidates() {
+		$s    = $this->c()->get( 'integrity' );
+		$text = $this->words( 30, 'pool' . $this->net );
+		$orig = $this->create( $this->fx['p4'], array(), $this->ip( 91 ), $text );
+		for ( $i = 0; $i < Scorer::CANDIDATES + 5; $i++ ) {
+			$this->fx['comments'][] = (int) wp_insert_comment(
+				array(
+					'comment_post_ID'  => $this->fx['p2'],
+					'comment_type'     => 'review',
+					'comment_content'  => 'Filler review ' . $i . ' ' . $this->words( 10, 'fill' . $i ),
+					'comment_approved' => 1,
+				)
+			);
+		}
+		$same  = $s->score(
+			array(
+				'content' => $text,
+				'pool_id' => $this->fx['p4'],
+			)
+		);
+		$other = $s->score(
+			array(
+				'content' => $text,
+				'pool_id' => $this->fx['p3'],
+			)
+		);
+		$this->ok( $orig && ( $same['reasons']['similar'] ?? 0 ) === $orig && ! isset( $other['reasons']['similar'] ), 'T7: a copy on the same product is found after ' . ( Scorer::CANDIDATES + 5 ) . ' newer reviews elsewhere; on another product (site-wide newest 50 only) it is not' );
+
+		$spam_text = $this->words( 30, 'spam' . $this->net );
+		$spam      = $this->create( $this->fx['p1'], array(), $this->ip( 92 ), $spam_text );
+		wp_set_comment_status( $spam, 'spam' );
+		$r = $s->score(
+			array(
+				'content' => $spam_text,
+				'pool_id' => $this->fx['p1'],
+			)
+		);
+		$this->ok( $spam && ! isset( $r['reasons']['similar'] ), 'T7: a copy of a review marked as spam is not flagged as similar' );
+	}
+
+	/**
+	 * T8: the real handlers pass the signed time, the token and the order.
+	 *
+	 * @return void
+	 */
+	private function t8_handlers() {
+		$rt  = Scorer::rt_value( time() - 3 );
+		$res = $this->submit(
+			array( $this->c()->get( 'review_form' ), 'handle_submit' ),
+			$this->fx['p1'],
+			array(
+				'ndvr_nonce' => \NdvReviews\Forms\ReviewForm::NONCE_ACTION,
+				'author'     => 'Guest',
+				'email'      => 'rr21-pf-' . wp_generate_password( 5, false, false ) . '@example.invalid',
+				'ndvr_rt'    => $rt,
+			),
+			$this->ip( 80 )
+		);
+		$r   = (array) get_comment_meta( $res['id'], Scorer::META_REASONS, true );
+		$this->ok( $res['id'] && isset( $r['fast'] ), 'T8: the product form handler scores the posted ndvr_rt (fast)' . $this->why( $res ) );
+
+		$res = $this->submit(
+			array( $this->c()->get( 'testimonial_form' ), 'handle_submit' ),
+			$this->fx['p2'],
+			array(
+				'nonce'   => \NdvReviews\Forms\TestimonialForm::NONCE,
+				'author'  => 'Guest',
+				'email'   => 'rr21-tf-' . wp_generate_password( 5, false, false ) . '@example.invalid',
+				'ndvr_rt' => $rt,
+			),
+			$this->ip( 81 )
+		);
+		$r    = (array) get_comment_meta( $res['id'], Scorer::META_REASONS, true );
+		$form = (string) $this->c()->get( 'testimonial_form' )->shortcode( array( 'product_id' => $this->fx['p2'] ) );
+		$this->ok( $res['id'] && isset( $r['fast'] ) && false !== strpos( $form, 'name="' . Scorer::RT_FIELD . '"' ), 'T8: the testimonial form carries ndvr_rt and its handler scores it' . $this->why( $res ) );
+
+		$email = 'rr21-lt-' . wp_generate_password( 5, false, false ) . '@example.invalid';
+		$o     = wc_create_order();
+		$o->set_billing_email( $email );
+		foreach ( array( 'p1', 'p2', 'p3' ) as $p ) {
+			$o->add_product( wc_get_product( $this->fx[ $p ] ), 1 );
+		}
+		$o->set_status( 'completed' );
+		$o->save();
+		$this->fx['orders'][] = (int) $o->get_id();
+		$tokens               = $this->c()->get( 'token_repository' );
+		$raw                  = $tokens->create_order_token( (int) $o->get_id(), $email, array( $this->fx['p1'], $this->fx['p2'], $this->fx['p3'] ) );
+		$row                  = $tokens->lookup( $raw );
+		$ip                   = $this->ip( 82 );
+		$text                 = $this->words( 30, 'lt' . $this->net );
+		$ids                  = array();
+		$bad                  = array();
+		foreach ( array( 'p1', 'p2', 'p3' ) as $p ) {
+			$res   = $this->submit(
+				array( $this->c()->get( 'landing' ), 'handle_submit' ),
+				$this->fx[ $p ],
+				array(
+					'nonce'   => \NdvReviews\Collection\Landing::NONCE,
+					'token'   => $raw,
+					'comment' => $text,
+				),
+				$ip
+			);
+			$ids[] = $res['id'];
+			$r     = (array) get_comment_meta( $res['id'], Scorer::META_REASONS, true );
+			if ( ! $res['id'] || isset( $r['ip_burst'] ) || isset( $r['email_burst'] ) || isset( $r['similar'] ) || (int) get_comment_meta( $res['id'], Scorer::META_TOKEN, true ) !== (int) ( $row ? $row->id : -1 ) ) {
+				$bad[] = $p . $this->why( $res );
+			}
+		}
+		$this->ok( $row && ! $bad, 'T8: one landing link reviewing three products through the handler stores the token id and gets no burst or similar' . ( $bad ? ' (' . implode( ', ', $bad ) . ')' : '' ) );
+	}
+
+	/**
+	 * T10: holds().
+	 *
+	 * @return void
+	 */
+	private function t10_holds() {
+		$id   = $this->fx['comments'][0];
+		$prev = get_comment_meta( $id, Scorer::META_SCORE, true );
+		update_comment_meta( $id, Scorer::META_SCORE, 60 );
+		$at = Scorer::holds( $id );
+		update_comment_meta( $id, Scorer::META_SCORE, 59 );
+		$below = Scorer::holds( $id );
+		update_comment_meta( $id, Scorer::META_SCORE, 60 );
+		$this->settings( array( 'integrity_hold_high' => false ) );
+		$hold_off = Scorer::holds( $id );
+		$this->settings(
+			array(
+				'integrity_hold_high' => true,
+				'integrity_enabled'   => false,
+			)
+		);
+		$checks_off = Scorer::holds( $id );
+		$this->settings( array( 'integrity_enabled' => true ) );
+		update_comment_meta( $id, Scorer::META_SCORE, $prev );
+		$this->ok( $at && ! $below && ! $hold_off && ! $checks_off, 'T10: holds() is true at 60 and false at 59, with the hold off, or with the checks off' );
+	}
+
+	/**
+	 * T11: edits are not scored; the export leaves out unchecked reviews.
+	 *
+	 * @return void
+	 */
+	private function t11_edits_export() {
+		$import = $this->fx['import'];
+		$scored = $this->fx['comments'][0];
+		$before = get_comment_meta( $scored, Scorer::META_SCORE, true );
+		wp_update_comment(
+			array(
+				'comment_ID'      => $import,
+				'comment_content' => 'An admin edit of an imported review.',
+			)
+		);
+		wp_update_comment(
+			array(
+				'comment_ID'      => $scored,
+				'comment_content' => 'Short.',
+			)
+		);
+		$this->ok( '' === (string) get_comment_meta( $import, Scorer::META_SCORE, true ) && $before === get_comment_meta( $scored, Scorer::META_SCORE, true ), 'T11: an admin edit writes no score and doesn\'t change one' );
+
+		$u    = $this->buyer( array( $this->fx['p2'] ) );
+		$id   = $this->create( $this->fx['p2'], array( 'user_id' => $u ), $this->ip( 93 ), 'Short one here.' );
+		$old  = get_comment_meta( $id, Scorer::META_REASONS, true );
+		$res  = $this->c()->get( 'reviews' )->update(
+			$id,
+			array(
+				'content'  => $this->words( 30, 'edited' ),
+				'criteria' => $this->data( $this->fx['p2'], array(), '' )['criteria'],
+			),
+			array( 'user_id' => $u )
+		);
+		$this->ok( true === $res && isset( $old['short_text'] ) && $old === get_comment_meta( $id, Scorer::META_REASONS, true ), 'T11: a customer\'s edit (RR-15) keeps the first score' . ( is_wp_error( $res ) ? ' (' . $res->get_error_message() . ')' : '' ) );
+
+		$email = 'rr21-ex-' . wp_generate_password( 5, false, false ) . '@example.invalid';
+		$one   = $this->create( $this->fx['p3'], array( 'email' => $email ), $this->ip( 94 ), $this->words( 30, 'ex1' ) );
+		$this->create(
+			$this->fx['p4'],
+			array(
+				'email'  => $email,
+				'source' => 'import',
+			),
+			$this->ip( 94 ),
+			$this->words( 30, 'ex2' )
+		);
+		update_comment_meta( $one, Scorer::META_REASONS, array( 'similar' => 123 ) );
+		$out  = $this->c()->get( 'integrity' )->export( $email, 1 );
+		$text = (string) ( $out['data'][0]['data'][0]['value'] ?? '' );
+		$this->ok( 1 === count( $out['data'] ) && false !== strpos( $text, 'Text matches review #123' ) && false === strpos( $text, '<' ), 'T11: the export lists only the checked review, in plain text' );
+	}
 	/**
 	 * AC13: benchmark (bounded queries; seeded rows on the SQLite QA site).
 	 *
@@ -491,6 +970,107 @@ final class NDVR_QA_RR21 {
 	}
 
 	// --------------------------------------------------------------- helpers
+
+	/**
+	 * A user registered some seconds ago.
+	 *
+	 * @param int $ago Seconds (negative: in the future).
+	 * @return int
+	 */
+	private function user( $ago ) {
+		$login               = 'rr21u' . wp_generate_password( 6, false, false );
+		$u                   = (int) wp_insert_user(
+			array(
+				'user_login'      => $login,
+				'user_email'      => $login . '@example.invalid',
+				'user_pass'       => wp_generate_password(),
+				'role'            => 'customer',
+				'user_registered' => gmdate( 'Y-m-d H:i:s', time() - (int) $ago ),
+			)
+		);
+		$this->fx['users'][] = $u;
+
+		return $u;
+	}
+
+	/**
+	 * Post a form to its AJAX handler as a guest.
+	 *
+	 * @param callable $handler Handler.
+	 * @param int      $product Product.
+	 * @param array    $post    Form fields (consent, stars and text are added; a nonce field holds its action).
+	 * @param string   $ip      Visitor IP.
+	 * @return array{json:array,id:int}
+	 */
+	private function submit( $handler, $product, array $post, $ip ) {
+		$scores = array();
+		foreach ( (array) $this->c()->get( 'criteria' )->get_active( $product ) as $c ) {
+			$scores[ (int) $c->id ] = '4';
+		}
+		wp_set_current_user( 0 );
+		// The nonce fields carry their actions; nonces are made as the guest.
+		foreach ( array( 'nonce', 'ndvr_nonce' ) as $field ) {
+			if ( isset( $post[ $field ] ) ) {
+				$post[ $field ] = wp_create_nonce( $post[ $field ] );
+			}
+		}
+		$_SERVER['REMOTE_ADDR'] = $ip;
+		$_POST                  = $post + array(
+			'product_id'    => (string) $product,
+			'ndvr_consent'  => '1',
+			'ndvr_criteria' => $scores,
+			'comment'       => $this->words( 30, 'sub' . wp_rand() ),
+		);
+		$_REQUEST               = $_POST;
+		$before                 = $this->last( $product );
+		$ajax                   = static function () {
+			return true;
+		};
+		$die                    = static function () {
+			return static function () {
+				throw new NDVR_QA_21_Die();
+			};
+		};
+		add_filter( 'wp_doing_ajax', $ajax );
+		add_filter( 'wp_die_ajax_handler', $die );
+		ob_start();
+		try {
+			call_user_func( $handler );
+		} catch ( NDVR_QA_21_Die $e ) {
+			unset( $e );
+		}
+		$out = (string) ob_get_clean();
+		remove_filter( 'wp_doing_ajax', $ajax );
+		remove_filter( 'wp_die_ajax_handler', $die );
+		$_POST    = array();
+		$_REQUEST = array();
+		wp_set_current_user( 1 );
+		$after = $this->last( $product );
+		$id    = $after !== $before ? $after : 0;
+		if ( $id ) {
+			$this->fx['comments'][] = $id;
+		}
+		$json = json_decode( $out, true );
+
+		return array(
+			'json' => is_array( $json ) ? $json : array( 'raw' => substr( $out, 0, 200 ) ),
+			'id'   => $id,
+		);
+	}
+
+	/**
+	 * Why a submission failed.
+	 *
+	 * @param array $res submit() result.
+	 * @return string
+	 */
+	private function why( array $res ) {
+		if ( $res['id'] ) {
+			return '';
+		}
+
+		return ' (' . wp_json_encode( $res['json'] ) . ')';
+	}
 
 	/**
 	 * Merge free settings.

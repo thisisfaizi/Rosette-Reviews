@@ -1,8 +1,18 @@
 # RR-21: Review integrity signals (local fake-review risk score)
 
-Status: in_review (rev 6) · Plan: F · Inherits PRD-00 + RR-00 · No table, no DB version (see §7) · No Pro-facing API, so no `NDVR_API` change · **Innovation:** no competitor does this self-hosted. Yotpo and WiserReview use cloud AI; CusRev uses its cloud verification.
+Status: built (rev 7) · Plan: F · Inherits PRD-00 + RR-00 · No table, no DB version (see §7) · `NDVR_API` 12 (`Scorer::holds()`, rev 6) · **Innovation:** no competitor does this self-hosted. Yotpo and WiserReview use cloud AI; CusRev uses its cloud verification.
 
 Review findings applied: round 2 RR-21 item 1 (score and hold placement in `create()`); round 3 batch B item 8 (the `integrity` sentence is canonical here).
+
+Rev 7 (code review `reviews/code-RR-21.md` applied):
+- **Settings card:** `render_settings()` reads both stored settings (not its argument, which is the `integrity_enabled` value) and prints the "on this form" marker for `integrity_hold_high`, which has no render callback of its own. Before this, unticking the hold was never saved and the boxes could show the wrong state (B1, B2).
+- **Links:** distinct URLs in the title and the plain text (`Scorer::count_links()`): `https://www.example.com` is one link and an `<a href>` whose text is its own address is one (M1). The title is part of the context (m7).
+- **Help text:** the card and the readme say that behind a proxy or CDN WordPress must see the visitor's own IP (M2). Pro's auto-approve help names the hold only while `hold_high()` is true; otherwise it says high-risk reviews are not held (M3).
+- **Signals:** `unverified` only for products (testimonials on pages can't be verified purchases, m8); account age ignores empty and future registration dates (m4); the email is queried as stored and lower-cased only for the disposable check (m6); words keep combining marks, and scripts without spaces (Chinese, Japanese, Thai and similar) use character 3-grams over at least 20 characters (m3).
+- **Disposable list:** forwarding and alias services that customers use for privacy (33mail, anonaddy, cock.li, e4ward, spamgourmet) are not listed (m2).
+- **Admin:** the High risk counts are cached in the `ndvr_risk_counts` transient (5 minutes) and forgotten on `review_risk_scored`, `transition_comment_status` and `deleted_comment` (m11). The Overview chip opens the pending High reviews (`risk_pending=1`, m9). The "Why" summary names the reviewer for screen readers (m13). The four comment-meta keys are in the uninstall registry (m14). `without_siblings()` returns early when no sibling rule can apply (m10).
+- **Readme:** a privacy line (checked on the server, nothing sent anywhere, edits keep the first score, proxy note) (m1).
+- **Tests:** rr-21.php 50/50 (AC1–AC17 plus review tests T1–T11: the settings round trip, `email_burst`, `new_account`, the order sibling, link forms, level/fast/similarity/word-count boundaries, the pool query and spam exclusion, the three form handlers, `holds()` variants, edits not re-scored, export exclusion). Pro rr-14p.php 4/4 (T12: Medium and hold-off cases, explicit settings, SKIP without API 12). Mutations: 27/27 killed (settings markers, each signal and its boundary, sibling rules, pool and spam queries, handler wiring, holds(), export, cache busting, the chip and view filters).
 
 Rev 6 (as built):
 - **Service** `integrity` (`Integrity\Scorer`, Registerable). `create()` computes the IP and `is_verified()` once above the insert, scores interactive sources after `validate_review`, applies the inline hold, stores `_ndvr_token_id` when passed, and calls `Scorer::save()` before `review_created`, so listeners (Pro AI) see the score.
@@ -11,7 +21,7 @@ Rev 6 (as built):
 - **`Scorer::holds( $comment_id )`** (NDVR_API 12): true when the hold is on and the stored score is High; Pro AI auto-publish skips such reviews (RR-21P-3, built).
 - **Admin:** column `risk` before the date ("Not checked" for older reviews), view `high_risk` (approved and pending), Overview chip counts pending High reviews, edit-screen row `#ndvr-risk` notes when the hold changed the decision. Pills: neutral, amber, danger in admin.css.
 - **Privacy:** an exporter "Rosette Reviews: review checks"; free's review eraser deletes the four keys.
-- **Tests:** rr-21.php 24/24; AC13 17.4 ms per score with 3,000 extra reviews on the SQLite QA site (the bounded queries keep the cost flat; 50,000 was not seeded on this memory-constrained machine). Pro rr-14p.php adds RR-21P-3.
+- **Tests:** rr-21.php 25/25; AC13 17.4 ms per score with 3,000 extra reviews on the SQLite QA site (the bounded queries keep the cost flat; 50,000 was not seeded on this memory-constrained machine). Pro rr-14p.php adds RR-21P-3.
 
 Rev 5 (reconciled with the code after RR-11 to RR-20, before building):
 - **Line numbers moved:** in `ReviewRepository::create()` `should_approve` is at :157, `validate_review` :165-168, `$commentdata` :170-183, the insert :186, `_ndvr_order_id` :228, `is_verified()` :239. The order the PRD sets is unchanged and still fits.
@@ -75,7 +85,7 @@ Non-goals:
 - `ReviewRepository::create()`: score after `should_approve` (:131) **and** after `validate_review` has passed (:139-142), so a review that `validate_review` rejects is never scored; set the hold before `$commentdata` is built (:144), so `comment_approved` (:156) already carries it; insert at :160.
 - `Reviews\VerifiedBuyer::is_verified()`: today it runs after the insert (ReviewRepository.php:201). It's moved above the insert and its result reused for the meta (same arguments, no behaviour change).
 - `Reviews\Sources::is_interactive()` (F1).
-- RR-12 `ReviewRepository::content_length()`.
+- RR-12 `Reviews\ReviewLength::count()` (named `content_length()` before rev 5).
 - Core's `comment_author_IP` (already stored, ReviewRepository.php:150, and blanked by the eraser, Privacy.php:280).
 - F4 column, view, row; F6 settings; F5 not needed.
 
@@ -136,7 +146,7 @@ Pro (paired tasks, Pro never edited by free):
 
 ## 8. Security
 - **Rating independence:** the scorer receives `$data` with `rating` and `criteria` **removed** before any signal runs, so no signal can read the rating. A unit test asserts that the scorer's input has no rating keys.
-- **No new public entry point.** The `ndvr_rt` field is read inside the existing nonce'd handlers. The HMAC means it can't be forged to look slow; it's a signal, not a gate.
+- **No new public entry point.** The `ndvr_rt` field is read inside the existing nonce'd handlers. The HMAC means it can't be forged to look fast; a replayed value (one form fetched and reused for up to 24 h) only makes a submission look slower. It's a signal, not a gate.
 - **Admin:** column, view and box behind `moderate_comments` (F4).
 - **Output:** reasons are built from slugs and integers with translated templates, `esc_html`'d; review links through `esc_url`.
 - **The hold in free:** free entry paths always pass `approved => 0` (ReviewForm.php:429, TestimonialForm.php:283, Landing.php:298), so every free review is moderated anyway. The hold changes the outcome only when a `should_approve` callback (Pro) approves.
@@ -163,6 +173,7 @@ Pro (paired tasks, Pro never edited by free):
 - HPOS: no order queries; `is_verified()` is unchanged.
 - Page caching: `ndvr_rt` staleness is harmless (§6).
 - Proxies and CDNs: `comment_author_IP` is whatever core records (`REMOTE_ADDR`, ReviewRepository.php:150). Behind a proxy, many customers share one IP, so `ip_burst` may over-fire. The help text recommends a real-IP setup; the weight is filterable.
+- IPv6: `ip_burst` matches exact addresses. One IPv6 client usually controls a whole /64 and can rotate within it, so a single IPv6 sender may not trip `ip_burst` (the other signals still apply). A /64 match is a possible later refinement.
 - Pro absent: hold inert (§8). Pro present: §5.
 
 ## 12. Acceptance criteria

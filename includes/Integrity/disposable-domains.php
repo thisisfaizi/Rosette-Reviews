@@ -2,7 +2,8 @@
 /**
  * Well-known disposable email domains (RR-21), written for this plugin
  * (GPL). Merchants extend it with the `ndv-reviews/disposable_domains`
- * filter. Lower-case, no subdomains.
+ * filter. Lower-case, no subdomains. Forwarding and alias services that real
+ * customers use for privacy are deliberately not listed.
  *
  * @package NdvReviews
  */
@@ -14,14 +15,11 @@ return array(
 	'10minutemail.com',
 	'10minutemail.net',
 	'20minutemail.com',
-	'33mail.com',
-	'anonaddy.me',
 	'anonbox.net',
 	'binkmail.com',
 	'bobmail.info',
 	'burnermail.io',
 	'chacuo.net',
-	'cock.li',
 	'deadaddress.com',
 	'despam.it',
 	'discard.email',
@@ -31,7 +29,6 @@ return array(
 	'dispostable.com',
 	'dodgit.com',
 	'dropmail.me',
-	'e4ward.com',
 	'emailondeck.com',
 	'emailtemporanea.com',
 	'fakeinbox.com',
@@ -87,7 +84,6 @@ return array(
 	'spam4.me',
 	'spambog.com',
 	'spambox.us',
-	'spamgourmet.com',
 	'spamex.com',
 	'spamfree24.org',
 	'spamhole.com',
