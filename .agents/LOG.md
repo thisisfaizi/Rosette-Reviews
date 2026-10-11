@@ -1016,3 +1016,19 @@ EVIDENCE: rr-25 18/18; fix mutations 8/9 killed (1 equivalent).
   counts each pool once (mirrored member figures). Coverage settled by RR-19's mirror (RR-24 m3).
 - RR-22: the low-rating alert and the invitation name the listing a review was written for (`_ndvr_pooled_from`).
 EVIDENCE: rr-24 23/23, rr-22 59/59 (pool cases through the generic `review_pool_id` filter); mutations 3/3 killed.
+
+## 2026-10-11 — RR-19 spike (§13.2): shared ratings across listings
+- Google: product variants may share review information through `ProductGroup`
+  (https://developers.google.com/search/docs/appearance/structured-data/product-variants,
+  https://developers.google.com/search/blog/2024/02/product-variants); review markup must be about the item on the page
+  (https://developers.google.com/search/docs/advanced/structured-data/review-snippet).
+- UK CMA (CMA208, April 2025, via https://www.linklaters.com/en/insights/blogs/linkingcompetition/2025/may/consumer-deep-dive_fake-reviews
+  and https://cms.law/en/gbr/legal-updates/no-more-faux-five-stars-the-dmcc-act-bans-fake-reviews): "review merging" — one
+  product's reviews promoting a different product — is misleading. Sources are secondary for the CMA text; the owner's
+  legal check of the attestation wording is part of OC-13's scope.
+- Decision: keep the attestation, the disclosure on every listing, "Review of …" per review, and default `shared`.
+
+## 2026-10-11 — `[ndvr-reviews show_summary="1"]` (for RR-19 AC22)
+- The shortcode now accepts `show_summary` (the block and the widget already did), so its summary and footer notes
+  (transparency, Pro's shared-listings note) show on that surface too.
+EVIDENCE: rr-03 62/62 (adds the shortcode check).

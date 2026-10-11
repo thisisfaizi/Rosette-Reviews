@@ -69,7 +69,7 @@ class Shortcodes implements Registerable {
 	}
 
 	/**
-	 * [ndvr-reviews product_id="" per_page="10" orderby="recent"]
+	 * [ndvr-reviews product_id="" per_page="10" orderby="recent" show_summary="0"]
 	 *
 	 * @param array<string,mixed>|string $atts Attributes.
 	 * @return string
@@ -77,10 +77,11 @@ class Shortcodes implements Registerable {
 	public function reviews( $atts ) {
 		$atts = shortcode_atts(
 			array(
-				'product_id' => 0,
-				'post_id'    => 0,
-				'per_page'   => 10,
-				'orderby'    => 'recent',
+				'product_id'   => 0,
+				'post_id'      => 0,
+				'per_page'     => 10,
+				'orderby'      => 'recent',
+				'show_summary' => '',
 			),
 			$atts,
 			'ndvr-reviews'
@@ -88,9 +89,11 @@ class Shortcodes implements Registerable {
 
 		return $this->widgets->reviews(
 			array(
-				'product_id' => $atts['product_id'] ? $atts['product_id'] : $atts['post_id'],
-				'per_page'   => (int) $atts['per_page'],
-				'orderby'    => sanitize_key( $atts['orderby'] ),
+				'product_id'   => $atts['product_id'] ? $atts['product_id'] : $atts['post_id'],
+				'per_page'     => (int) $atts['per_page'],
+				'orderby'      => sanitize_key( $atts['orderby'] ),
+				// The summary above the list, as the block and the widget offer (with its footer notes).
+				'show_summary' => in_array( strtolower( (string) $atts['show_summary'] ), array( '1', 'yes', 'true' ), true ),
 			)
 		);
 	}

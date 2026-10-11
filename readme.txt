@@ -151,6 +151,7 @@ Only if you turn on "Remove all data on uninstall" in Settings. Reviews created 
 == Changelog ==
 
 = Unreleased =
+* The [ndvr-reviews] shortcode can show the rating summary above the list: show_summary="1".
 * Product identifiers in structured data: GTIN and MPN from a custom field you choose, and the brand from an attribute or taxonomy, added to the product's schema only when WooCommerce or your SEO plugin hasn't set them (nothing is overwritten). GTINs are checked, including the check digit. Rosette Reviews → Settings → SEO & Advanced.
 * Review health on the Overview: the share of products with reviews (and a list of those without), products that sold in the last 90 days but have no review in the last 12 months, how many recent low reviews you replied to, and the recent average rating against all time. Worked out in the background at most once an hour, so the Overview stays fast. All Reviews can now filter 1 to 3 star reviews together.
 * Verified reviews can show how long after purchase they were written, for example "Reviewed 3 weeks after purchase" (on by default; Rosette Reviews → Settings → Reviews and trust). The date comes from the reviewer's own paid order, never from an email typed into the form. Existing verified reviews from review links are filled in once in the background. Privacy: for verified reviews, the date of the matching order is stored with the review; it is part of the reviewer's personal data export and is erased with it.

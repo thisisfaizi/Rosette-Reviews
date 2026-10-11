@@ -136,6 +136,10 @@ final class NDVR_QA_RR03 {
 		$this->enable();
 		$html = do_shortcode( '[ndvr-summary product_id="' . $product . '"]' );
 		$this->ok( 1 === substr_count( $html, '<details class="ndvr-transparency"' ) && (bool) preg_match( '/<details class="ndvr-transparency"[^>]*>\s*<summary>/', $html ), 'AC1: switched on, exactly one <details> whose first child is <summary>' );
+		// The reviews shortcode's own summary carries the notice too (show_summary).
+		$list = do_shortcode( '[ndvr-reviews product_id="' . $product . '" show_summary="1"]' );
+		$bare = do_shortcode( '[ndvr-reviews product_id="' . $product . '"]' );
+		$this->ok( 1 === substr_count( $list, '<details class="ndvr-transparency"' ) && false === strpos( $bare, 'ndvr-transparency' ), 'AC1: [ndvr-reviews show_summary="1"] shows its summary with the notice once; without it, no summary and no notice' );
 	}
 
 	/**
