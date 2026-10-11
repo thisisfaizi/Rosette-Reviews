@@ -53,6 +53,13 @@ final class NDVR_QA_RR24 {
 	private $saved = array();
 
 	/**
+	 * A $pagenow other than edit.php for the next list.
+	 *
+	 * @var string
+	 */
+	private $page_override = '';
+
+	/**
 	 * The catalog filter.
 	 *
 	 * @var callable|null
@@ -78,6 +85,7 @@ final class NDVR_QA_RR24 {
 			$this->ac5_ac11();
 			$this->ac6();
 			$this->ac7();
+			$this->review_fixes();
 			$this->ac9();
 			$this->ac8();
 		} catch ( \Throwable $e ) {
@@ -134,7 +142,7 @@ final class NDVR_QA_RR24 {
 			$this->review( $this->fx[ 'c' . $i ], 5, 200 );
 			$this->aggregate( $this->fx[ 'c' . $i ], 5.0, 1 );
 		}
-		$ours        = $this->fx['products'];
+		$ours        = &$this->fx['products'];
 		$this->limit = static function ( $args ) use ( &$ours ) {
 			$args['post__in'] = $ours;
 			return $args;
@@ -268,7 +276,7 @@ final class NDVR_QA_RR24 {
 		$this->h()->sales_job( 1 );
 		remove_filter( 'woocommerce_order_query_args', $args );
 		remove_filter( 'query', $count );
-		$sales    = (array) get_transient( Health::SALES_TRANSIENT );
+		$sales    = (array) ( get_transient( Health::SALES_TRANSIENT )['ids'] ?? array() );
 		$fallback = $this->h()->compute();
 		$this->ok( $calls && array( 'ids' ) === array_values( array_unique( $calls ) ) && 1 === $items && in_array( $this->fx['c1'], $sales, true ) && in_array( $this->fx['c3'], $sales, true ) && ! in_array( $this->fx['c2'], $sales, true ), 'AC12: the fallback asks WooCommerce for order ids only and reads products with one order-items query for the page' );
 		$this->ok( $primary === $fallback['stale_ids'] && ! $fallback['sales_pending'], 'AC3: after the job, Going stale shows the same products as from the lookup tables' );
@@ -295,6 +303,8 @@ final class NDVR_QA_RR24 {
 		for ( $i = 0; $i < 4; $i++ ) {
 			$low[] = $this->review( $this->fx['c4'], 2, 5 );
 		}
+		// A low review on a product outside the catalog (hidden) doesn't count.
+		$this->review( $this->fx['hidden'], 1, 5 );
 		$this->reply( $low[0], 1 );
 		$this->reply( $low[1], $customer );
 		update_comment_meta( $low[2], '_ndvr_admin_reply', 'Sorry about that, we sent a new one.' );
@@ -321,7 +331,7 @@ final class NDVR_QA_RR24 {
 	private function ac5_ac11() {
 		global $wpdb;
 		$since  = gmdate( 'Y-m-d H:i:s', time() - 90 * DAY_IN_SECONDS );
-		$recent = (float) $wpdb->get_var( $wpdb->prepare( "SELECT AVG(CAST(m.meta_value AS UNSIGNED)) FROM {$wpdb->comments} c INNER JOIN {$wpdb->commentmeta} m ON m.comment_id = c.comment_ID AND m.meta_key = 'rating' WHERE c.comment_approved = '1' AND c.comment_parent = 0 AND c.comment_type IN ('review','comment') AND c.comment_date_gmt >= %s AND CAST(m.meta_value AS UNSIGNED) BETWEEN 1 AND 5", $since ) );
+		$recent = (float) $wpdb->get_var( $wpdb->prepare( "SELECT AVG(CAST(m.meta_value AS UNSIGNED)) FROM {$wpdb->comments} c INNER JOIN {$wpdb->commentmeta} m ON m.comment_id = c.comment_ID AND m.meta_key = 'rating' WHERE c.comment_approved = '1' AND c.comment_parent = 0 AND c.comment_type IN ('review','comment') AND c.comment_post_ID IN (" . implode( ',', array_map( 'intval', array_diff( $this->fx['products'], array( $this->fx['hidden'], $this->fx['grouped'] ) ) ) ) . ") AND c.comment_date_gmt >= %s AND CAST(m.meta_value AS UNSIGNED) BETWEEN 1 AND 5", $since ) );
 		$arrow  = array();
 		foreach ( array( '0.3' => 0.3, '0.2' => 0.2 ) as $k => $gap ) {
 			for ( $i = 1; $i <= 6; $i++ ) {
@@ -413,6 +423,7 @@ final class NDVR_QA_RR24 {
 			false
 		);
 		as_unschedule_all_actions( Health::RECOMPUTE_HOOK );
+		$this->unmark();
 		$ids = array();
 		for ( $i = 0; $i < 4; $i++ ) {
 			$ids[] = $this->review( $this->fx['c5'], 4, 1, '0' );
@@ -464,7 +475,7 @@ final class NDVR_QA_RR24 {
 		as_schedule_single_action( time() + 600, Health::RECOMPUTE_HOOK, array(), 'ndv-reviews' );
 		\NdvReviews\Deactivator::deactivate();
 		$log = implode( "\n", \NdvReviews\Uninstall::run( true ) );
-		$this->ok( ! as_has_scheduled_action( Health::SALES_HOOK ) && ! as_has_scheduled_action( Health::RECOMPUTE_HOOK ) && false !== strpos( $log, 'option: ' . Health::OPTION ) && false !== strpos( $log, 'transient: ' . Health::SALES_TRANSIENT ), 'AC9: deactivation unschedules both jobs; the uninstall dry run lists the option and the transient' );
+		$this->ok( ! as_has_scheduled_action( Health::SALES_HOOK ) && ! as_has_scheduled_action( Health::RECOMPUTE_HOOK ) && false !== strpos( $log, 'option: ' . Health::OPTION ) && false !== strpos( $log, 'transient: ' . Health::SALES_TRANSIENT ) && false !== strpos( $log, 'transient: ' . Health::SALES_PARTIAL ) && (bool) preg_match( '/scheduler hooks: .*' . Health::RECOMPUTE_HOOK . '.*' . Health::SALES_HOOK . '/', $log ), 'AC9: deactivation unschedules both jobs; the uninstall dry run lists the option, both transients and both hooks' );
 	}
 
 	/**
@@ -533,6 +544,160 @@ final class NDVR_QA_RR24 {
 		$this->ok( true, sprintf( 'AC8 (benchmark, not a gate): compute() took %.0f ms with %d products and %d reviews on the SQLite QA site (target 300 ms)', $ms, $products, $reviews ) );
 	}
 
+	/**
+	 * Code review RR-24: refunds, variations, every trigger, the stale
+	 * reschedule, the 12-hour refresh, the low-star list, the page check.
+	 *
+	 * @return void
+	 */
+	private function review_fixes() {
+		global $wpdb, $pagenow;
+		$h = $this->h();
+
+		// m1 + T: a refund is not a sale; a variation sale counts for its parent.
+		$var = new \WC_Product_Variable();
+		$var->set_name( 'RR24 Variable' );
+		$var->set_status( 'publish' );
+		$vp        = (int) $var->save();
+		$variation = new \WC_Product_Variation();
+		$variation->set_parent_id( $vp );
+		$variation->set_regular_price( '10' );
+		$vid                    = (int) $variation->save();
+		$this->fx['products'][] = $vid;
+		$this->fx['products'][] = $vp;
+		$this->review( $vp, 5, 400 );
+		$this->aggregate( $vp, 5, 1 );
+		$this->order( array( $vid ), time() - 5 * DAY_IN_SECONDS );
+		$old    = $this->fx['orders'][1];
+		// A partial refund of the old c2 order today, with its line: it keeps the/n/t/t// parent/x27s paid status in the stats table and has product rows.
+		$items  = wc_get_order( $old )->get_items();
+		$item   = reset( $items );
+		$refund = wc_create_refund(
+			array(
+				'order_id'   => $old,
+				'amount'     => 4,
+				'reason'     => 'RR24 refund',
+				'line_items' => array(
+					$item->get_id() => array(
+						'qty'          => 1,
+						'refund_total' => 4,
+					),
+				),
+			)
+		);
+		if ( $refund instanceof \WC_Order_Refund ) {
+			$this->fx['orders'][] = (int) $refund->get_id();
+			\Automattic\WooCommerce\Admin\API\Reports\Orders\Stats\DataStore::sync_order( (int) $refund->get_id() );
+			\Automattic\WooCommerce\Admin\API\Reports\Products\DataStore::sync_order_products( (int) $refund->get_id() );
+		}
+		$primary = $h->compute()['stale_ids'];
+		delete_transient( Health::SALES_TRANSIENT );
+		$h->sales_job( 1 );
+		$sales = (array) ( get_transient( Health::SALES_TRANSIENT )['ids'] ?? array() );
+		$want  = array( $this->fx['c1'], $vp );
+		sort( $want );
+		$this->ok( $refund instanceof \WC_Order_Refund && $want === $primary && ! in_array( $this->fx['c2'], $sales, true ), 'm1: a recent refund of an old order is not a sale (lookup tables and fallback); a variation sold recently makes its parent "going stale"' );
+
+		// M1: the "without reviews" list leaves out drafts.
+		$draft                  = new \WC_Product_Simple();
+		$draft->set_name( 'RR24 Draft' );
+		$draft->set_status( 'draft' );
+		$this->fx['products'][] = (int) $draft->save();
+		$list                   = $this->list_ids( array( 'ndvr_unreviewed' => '1' ) );
+		$this->ok( ! in_array( end( $this->fx['products'] ), $list, true ) && in_array( $this->fx['c7'], $list, true ), 'M1: "Show products without reviews" lists published catalog products only (no drafts)' );
+
+		// M2 + m7: every trigger marks stale; a stale copy is rescheduled from the Overview.
+		$base = array(
+			'measures'    => array(),
+			'stale_ids'   => array(),
+			'computed_ts' => time() - 2 * HOUR_IN_SECONDS,
+			'stale'       => false,
+		);
+		$hit  = array();
+		foreach ( array( 'created', 'inserted', 'unpublished' ) as $k ) {
+			update_option( Health::OPTION, $base, false );
+			$this->unmark();
+			if ( 'created' === $k ) {
+				do_action( 'ndv-reviews/review_created', 0, array() );
+			} elseif ( 'inserted' === $k ) {
+				$this->review( $this->fx['c6'], 5, 1 );
+			} else {
+				wp_update_post(
+					array(
+						'ID'          => $this->fx['c10'],
+						'post_status' => 'draft',
+					)
+				);
+			}
+			$hit[ $k ] = ! empty( get_option( Health::OPTION )['stale'] );
+		}
+		wp_update_post(
+			array(
+				'ID'          => $this->fx['c10'],
+				'post_status' => 'publish',
+			)
+		);
+		as_unschedule_all_actions( Health::RECOMPUTE_HOOK );
+		update_option( Health::OPTION, array( 'stale' => true ) + $base, false );
+		ob_start();
+		$h->render();
+		ob_end_clean();
+		$stale_pending = $this->pending( Health::RECOMPUTE_HOOK );
+		as_unschedule_all_actions( Health::RECOMPUTE_HOOK );
+		update_option( Health::OPTION, array( 'computed_ts' => time() - 13 * HOUR_IN_SECONDS ) + $base, false );
+		ob_start();
+		$h->render();
+		ob_end_clean();
+		$old_pending = $this->pending( Health::RECOMPUTE_HOOK );
+		as_unschedule_all_actions( Health::RECOMPUTE_HOOK );
+		$this->ok( $hit['created'] && $hit['inserted'] && $hit['unpublished'] && 1 === $stale_pending && 1 === $old_pending, 'M2/m7: a new review, an approved comment on a product and unpublishing a product mark the figures stale; the Overview reschedules a stale or 13-hour-old copy' );
+
+		// m6: a change during the job keeps the copy stale.
+		$this->unmark();
+		update_option( Health::OPTION, array( 'dirty_ts' => time() + 60 ) + $base, false );
+		$h->recompute();
+		$this->ok( ! empty( get_option( Health::OPTION )['stale'] ), 'm6: a change made while the recompute ran leaves the new copy marked stale' );
+
+		// The All Reviews "1 to 3 ★" filter itself.
+		require_once ABSPATH . 'wp-admin/includes/screen.php';
+		require_once ABSPATH . 'wp-admin/includes/template.php';
+		require_once ABSPATH . 'wp-admin/includes/class-wp-list-table.php';
+		set_current_screen( 'rosette_page_' . \NdvReviews\Moderation\Page::PAGE_SLUG );
+		$_GET  = array(
+			'page'       => \NdvReviews\Moderation\Page::PAGE_SLUG,
+			'star'       => 'low',
+			'product_id' => (string) $this->fx['c4'],
+		);
+		$table = new \NdvReviews\Moderation\ListTable( \NdvReviews\Moderation\Page::PAGE_SLUG );
+		$table->prepare_items();
+		$_GET                      = array();
+		$GLOBALS['current_screen'] = null;
+		$ratings                   = array();
+		foreach ( (array) $table->items as $item ) {
+			$ratings[] = (int) get_comment_meta( (int) ( is_object( $item ) ? $item->comment_ID : $item['id'] ), 'rating', true );
+		}
+		$this->ok( 4 === count( $ratings ) && max( $ratings ) <= 3 && min( $ratings ) >= 1, 'star=low: All Reviews lists only 1 to 3 star reviews (' . implode( ',', $ratings ) . ')' );
+
+		// AC6: only on edit.php.
+		$prev    = $pagenow;
+		$this->page_override = 'post-new.php';
+		$other   = $this->list_ids( array( 'ndvr_unreviewed' => '1' ) );
+		$this->page_override = '';
+		$plain   = $this->list_ids( array() );
+		$this->ok( $other === $plain, 'AC6: the query var does nothing outside edit.php' );
+		unset( $prev );
+	}
+
+	/**
+	 * Let mark_stale() run again (it works once per request).
+	 *
+	 * @return void
+	 */
+	private function unmark() {
+		$p = new \ReflectionProperty( $this->h(), 'marked' );
+		$p->setAccessible( true );
+		$p->setValue( $this->h(), false );
+	}
 	// --------------------------------------------------------------- helpers
 
 	/**
@@ -587,7 +752,7 @@ final class NDVR_QA_RR24 {
 		wp_set_current_user( (int) $user );
 		$prev_page = $pagenow;
 		$prev_main = $GLOBALS['wp_the_query'];
-		$pagenow   = 'edit.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+		$pagenow   = '' !== $this->page_override ? $this->page_override : 'edit.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
 		$_GET      = $get + array( 'post_type' => $post_type );
 		$q         = new \WP_Query();
 		if ( $main ) {
@@ -596,7 +761,6 @@ final class NDVR_QA_RR24 {
 		$q->query(
 			array(
 				'post_type'      => $post_type,
-				'post_status'    => 'publish',
 				'post__in'       => 'product' === $post_type ? $this->fx['products'] : array( 0 ),
 				'fields'         => 'ids',
 				'posts_per_page' => -1,

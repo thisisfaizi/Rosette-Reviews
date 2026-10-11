@@ -30,6 +30,14 @@ class Health implements Registerable {
 	const CHUNK           = 500;
 	const SALES_PAGE      = 200;
 	const REFRESH_AFTER   = 12 * HOUR_IN_SECONDS;
+	const SALES_KEEP      = 7 * DAY_IN_SECONDS;
+
+	/**
+	 * Whether mark_stale() already ran in this request.
+	 *
+	 * @var bool
+	 */
+	private $marked = false;
 
 	/**
 	 * Hooks.
@@ -42,6 +50,7 @@ class Health implements Registerable {
 		add_action( self::SALES_HOOK, array( $this, 'sales_job' ) );
 		add_action( 'transition_comment_status', array( $this, 'on_comment_status' ), 10, 3 );
 		add_action( 'ndv-reviews/review_created', array( $this, 'mark_stale' ), 10, 0 );
+		add_action( 'wp_insert_comment', array( $this, 'on_insert_comment' ), 10, 2 );
 		add_action( 'transition_post_status', array( $this, 'on_post_status' ), 10, 3 );
 		add_action( 'pre_get_posts', array( $this, 'filter_products' ) );
 		add_action( 'admin_notices', array( $this, 'list_notice' ) );
@@ -67,6 +76,21 @@ class Health implements Registerable {
 	}
 
 	/**
+	 * A comment saved already approved on a product (a store reply, an
+	 * imported review): the figures may change.
+	 *
+	 * @param int         $id      Comment id.
+	 * @param \WP_Comment $comment Comment.
+	 * @return void
+	 */
+	public function on_insert_comment( $id, $comment ) {
+		unset( $id );
+		if ( $comment instanceof \WP_Comment && '1' === (string) $comment->comment_approved && 'product' === get_post_type( (int) $comment->comment_post_ID ) ) {
+			$this->mark_stale();
+		}
+	}
+
+	/**
 	 * A product was published or unpublished.
 	 *
 	 * @param string   $new_status New status.
@@ -86,9 +110,15 @@ class Health implements Registerable {
 	 * @return void
 	 */
 	public function mark_stale() {
-		$data = get_option( self::OPTION );
-		if ( is_array( $data ) && empty( $data['stale'] ) ) {
-			$data['stale'] = true;
+		// Once per request: bulk moderation fires this for every review.
+		if ( $this->marked ) {
+			return;
+		}
+		$this->marked = true;
+		$data         = get_option( self::OPTION );
+		if ( is_array( $data ) ) {
+			$data['stale']    = true;
+			$data['dirty_ts'] = time();
 			update_option( self::OPTION, $data, false );
 		}
 		$this->schedule( is_array( $data ) && isset( $data['computed_ts'] ) ? (int) $data['computed_ts'] : 0 );
@@ -113,11 +143,15 @@ class Health implements Registerable {
 	 * @return void
 	 */
 	public function recompute() {
+		$start               = time();
 		$data                = $this->compute();
+		$before              = get_option( self::OPTION );
 		$data['computed_at'] = current_time( 'mysql', true );
-		$data['computed_ts'] = time();
-		$data['stale']       = false;
+		$data['computed_ts'] = $start;
+		// A change while this ran keeps the copy stale; the next Overview load reschedules.
+		$data['stale'] = is_array( $before ) && (int) ( $before['dirty_ts'] ?? 0 ) > $start;
 		update_option( self::OPTION, $data, false );
+		$this->marked = false;
 	}
 
 	// ── The figures ──────────────────────────────────────────────────────
@@ -134,9 +168,9 @@ class Health implements Registerable {
 
 		$measures = array(
 			$this->coverage_row( $catalog ),
-			$this->stale_row( $stale, null === $sales ),
+			$this->stale_row( $stale, null === $sales, ! empty( $sales ) ),
 		);
-		$replies  = $this->replies_row();
+		$replies  = $this->replies_row( $catalog );
 		if ( $replies ) {
 			$measures[] = $replies;
 		}
@@ -294,7 +328,11 @@ class Health implements Registerable {
 	 */
 	private function stale_ids( array $sales, array $catalog ) {
 		global $wpdb;
-		$pools  = array_values( array_unique( array_map( array( Pool::class, 'resolve_id' ), array_map( 'intval', $sales ) ) ) );
+		$sales = array_map( 'intval', $sales );
+		foreach ( array_chunk( $sales, self::CHUNK ) as $chunk ) {
+			_prime_post_caches( $chunk, false, false );
+		}
+		$pools  = array_values( array_unique( array_map( array( Pool::class, 'resolve_id' ), $sales ) ) );
 		$pools  = array_values( array_intersect( $pools, $catalog ) );
 		$cutoff = gmdate( 'Y-m-d H:i:s', time() - self::stale_days() * DAY_IN_SECONDS );
 		$stale  = array();
@@ -314,15 +352,16 @@ class Health implements Registerable {
 	 *
 	 * @param int[] $stale   Stale product ids.
 	 * @param bool  $pending Whether recent sales are still being worked out.
+	 * @param bool  $sold    Whether anything sold in the recent window.
 	 * @return array<string,mixed>
 	 */
-	private function stale_row( array $stale, $pending ) {
+	private function stale_row( array $stale, $pending, $sold = true ) {
 		$row = array(
 			'key'   => 'stale',
 			'label' => __( 'Going stale', 'rosette-reviews' ),
 		);
 		if ( $pending ) {
-			$row['text'] = __( 'Checking recent sales. This updates within an hour.', 'rosette-reviews' );
+			$row['text'] = __( 'Checking recent sales. This usually updates within an hour.', 'rosette-reviews' );
 			return $row;
 		}
 		$days   = self::stale_days();
@@ -330,9 +369,13 @@ class Health implements Registerable {
 			? __( 'in the last 12 months', 'rosette-reviews' )
 			/* translators: %s: number of days. */
 			: sprintf( _n( 'in the last %s day', 'in the last %s days', $days, 'rosette-reviews' ), number_format_i18n( $days ) );
+		if ( ! $sold ) {
+			$row['text'] = __( 'No sales in the recent window, so nothing to check.', 'rosette-reviews' );
+			return $row;
+		}
 		if ( ! $stale ) {
 			/* translators: %s: "in the last 12 months" or "in the last N days". */
-			$row['text'] = sprintf( __( 'Every product that sold recently has a review %s.', 'rosette-reviews' ), $window );
+			$row['text'] = sprintf( __( 'No product that sold recently has gone without a review %s.', 'rosette-reviews' ), $window );
 			return $row;
 		}
 		$count = count( $stale );
@@ -358,13 +401,18 @@ class Health implements Registerable {
 	 * Replies to low reviews (1 to 3 stars) in the recent window; null when
 	 * there were none.
 	 *
+	 * @param int[] $catalog Catalog ids.
 	 * @return array<string,mixed>|null
 	 */
-	private function replies_row() {
+	private function replies_row( array $catalog ) {
 		global $wpdb;
 		$since = gmdate( 'Y-m-d H:i:s', time() - self::recent_days() * DAY_IN_SECONDS );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
-		$low = array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT c.comment_ID FROM {$wpdb->comments} c INNER JOIN {$wpdb->commentmeta} m ON m.comment_id = c.comment_ID AND m.meta_key = 'rating' WHERE c.comment_approved = '1' AND c.comment_parent = 0 AND c.comment_type IN ('review','comment') AND c.comment_date_gmt >= %s AND CAST(m.meta_value AS UNSIGNED) BETWEEN 1 AND 3", $since ) ) );
+		$low   = array();
+		foreach ( array_chunk( $catalog, self::CHUNK ) as $chunk ) {
+			$in = implode( ',', array_map( 'intval', $chunk ) );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in is integers.
+			$low = array_merge( $low, array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT c.comment_ID FROM {$wpdb->comments} c INNER JOIN {$wpdb->commentmeta} m ON m.comment_id = c.comment_ID AND m.meta_key = 'rating' WHERE c.comment_approved = '1' AND c.comment_parent = 0 AND c.comment_type IN ('review','comment') AND c.comment_post_ID IN ({$in}) AND c.comment_date_gmt >= %s AND CAST(m.meta_value AS UNSIGNED) BETWEEN 1 AND 3", $since ) ) ) );
+		}
 		if ( ! $low ) {
 			return null;
 		}
@@ -426,11 +474,19 @@ class Health implements Registerable {
 	private function trend_row( array $catalog ) {
 		global $wpdb;
 		$since = gmdate( 'Y-m-d H:i:s', time() - self::recent_days() * DAY_IN_SECONDS );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
-		$recent = $wpdb->get_row( $wpdb->prepare( "SELECT AVG(CAST(m.meta_value AS UNSIGNED)) AS avg_rating, COUNT(*) AS n FROM {$wpdb->comments} c INNER JOIN {$wpdb->commentmeta} m ON m.comment_id = c.comment_ID AND m.meta_key = 'rating' WHERE c.comment_approved = '1' AND c.comment_parent = 0 AND c.comment_type IN ('review','comment') AND c.comment_date_gmt >= %s AND CAST(m.meta_value AS UNSIGNED) BETWEEN 1 AND 5", $since ) );
-		if ( ! $recent || ! (int) $recent->n ) {
+		$r_sum = 0;
+		$r_n   = 0;
+		foreach ( array_chunk( $catalog, self::CHUNK ) as $chunk ) {
+			$in = implode( ',', array_map( 'intval', $chunk ) );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in is integers.
+			$part   = $wpdb->get_row( $wpdb->prepare( "SELECT SUM(CAST(m.meta_value AS UNSIGNED)) AS total, COUNT(*) AS n FROM {$wpdb->comments} c INNER JOIN {$wpdb->commentmeta} m ON m.comment_id = c.comment_ID AND m.meta_key = 'rating' WHERE c.comment_approved = '1' AND c.comment_parent = 0 AND c.comment_type IN ('review','comment') AND c.comment_post_ID IN ({$in}) AND c.comment_date_gmt >= %s AND CAST(m.meta_value AS UNSIGNED) BETWEEN 1 AND 5", $since ) );
+			$r_sum += $part ? (int) $part->total : 0;
+			$r_n   += $part ? (int) $part->n : 0;
+		}
+		if ( ! $r_n ) {
 			return null;
 		}
+		$recent = (object) array( 'avg_rating' => $r_sum / $r_n );
 		// All time from the stored product aggregates: no review scan.
 		$sum   = 0.0;
 		$count = 0;
@@ -443,7 +499,7 @@ class Health implements Registerable {
 		}
 		$recent_avg = round( (float) $recent->avg_rating, 1 );
 		$overall    = $count ? round( $sum / $count, 2 ) : $recent_avg;
-		$lower      = round( $overall - (float) $recent->avg_rating, 2 ) >= 0.3;
+		$lower      = round( round( $overall, 1 ) - $recent_avg, 2 ) >= 0.3;
 
 		return array(
 			'key'     => 'trend',
@@ -467,14 +523,13 @@ class Health implements Registerable {
 			return $primary;
 		}
 		$cached = get_transient( self::SALES_TRANSIENT );
-		if ( is_array( $cached ) ) {
-			return array_map( 'intval', $cached );
-		}
-		if ( function_exists( 'as_enqueue_async_action' ) && ! as_has_scheduled_action( self::SALES_HOOK ) ) {
+		$fresh  = is_array( $cached ) && isset( $cached['ids'], $cached['at'] ) && time() - (int) $cached['at'] < self::REFRESH_AFTER;
+		if ( ! $fresh && function_exists( 'as_enqueue_async_action' ) && ! as_has_scheduled_action( self::SALES_HOOK ) ) {
 			as_enqueue_async_action( self::SALES_HOOK, array( 1 ), 'ndv-reviews', true );
 		}
+		// The last complete set stays in use while a new one is built.
 
-		return null;
+		return is_array( $cached ) && isset( $cached['ids'] ) ? array_map( 'intval', (array) $cached['ids'] ) : null;
 	}
 
 	/**
@@ -493,13 +548,14 @@ class Health implements Registerable {
 		$stats  = $wpdb->prefix . 'wc_order_stats';
 		foreach ( array( $lookup, $stats ) as $table ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			if ( $table !== $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) ) {
+			if ( 0 !== strcasecmp( $table, (string) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) ) ) {
 				return null;
 			}
 		}
 		$statuses = array_map(
 			static function ( $status ) {
-				return 'wc-' . $status;
+				// wc_order_stats.status is varchar(20).
+				return substr( 'wc-' . $status, 0, 20 );
 			},
 			self::paid_statuses()
 		);
@@ -507,12 +563,13 @@ class Health implements Registerable {
 		// date_created is indexed and in site time: one extra day covers any offset.
 		$since = wp_date( 'Y-m-d H:i:s', time() - ( self::recent_days() + 1 ) * DAY_IN_SECONDS );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- WooCommerce tables (not ours) from the prefix; $in is placeholders.
-		$ids = array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT l.product_id FROM {$lookup} l INNER JOIN {$stats} s ON s.order_id = l.order_id WHERE l.date_created >= %s AND s.status IN ({$in})", array_merge( array( $since ), $statuses ) ) ) );
+		$ids = array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT l.product_id FROM {$lookup} l INNER JOIN {$stats} s ON s.order_id = l.order_id WHERE l.date_created >= %s AND s.parent_id = 0 AND s.status IN ({$in})", array_merge( array( $since ), $statuses ) ) ) );
 		if ( $ids ) {
 			return $ids;
 		}
 		$orders = wc_get_orders(
 			array(
+				'type'         => 'shop_order',
 				'limit'        => 1,
 				'return'       => 'ids',
 				'status'       => self::paid_statuses(),
@@ -537,6 +594,7 @@ class Health implements Registerable {
 		$partial = is_array( $partial ) ? $partial : array();
 		$ids     = function_exists( 'wc_get_orders' ) ? wc_get_orders(
 			array(
+				'type'         => 'shop_order',
 				'limit'        => self::SALES_PAGE,
 				'page'         => $page,
 				'return'       => 'ids',
@@ -556,7 +614,14 @@ class Health implements Registerable {
 			as_enqueue_async_action( self::SALES_HOOK, array( $page + 1 ), 'ndv-reviews', true );
 			return;
 		}
-		set_transient( self::SALES_TRANSIENT, $partial, DAY_IN_SECONDS );
+		set_transient(
+			self::SALES_TRANSIENT,
+			array(
+				'ids' => $partial,
+				'at'  => time(),
+			),
+			self::SALES_KEEP
+		);
 		delete_transient( self::SALES_PARTIAL );
 		$this->mark_stale();
 	}
@@ -581,9 +646,10 @@ class Health implements Registerable {
 		$data = get_option( self::OPTION );
 		if ( ! is_array( $data ) ) {
 			$this->schedule( 0 );
-		} elseif ( empty( $data['stale'] ) && time() - (int) ( $data['computed_ts'] ?? 0 ) > self::REFRESH_AFTER ) {
-			// Quiet stores refresh through the same debounced job.
-			$this->mark_stale();
+		} elseif ( ! empty( $data['stale'] ) || time() - (int) ( $data['computed_ts'] ?? 0 ) > self::REFRESH_AFTER ) {
+			// Stale (a job lost to deactivation or a failure) or old (a quiet
+			// store): make sure the debounced job is pending.
+			$this->schedule( (int) ( $data['computed_ts'] ?? 0 ) );
 		}
 		?>
 		<section class="ndvr-card ndvr-health" aria-labelledby="ndvr-health-title">
@@ -667,8 +733,14 @@ class Health implements Registerable {
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		if ( $unreviewed ) {
 			$catalog = self::catalog_args();
+			$query->set( 'post_status', $catalog['post_status'] ?? 'publish' );
 			$query->set( 'post_parent', 0 );
-			$query->set( 'tax_query', array_merge( (array) $query->get( 'tax_query' ), array( $catalog['tax_query'] ) ) );
+			if ( ! empty( $catalog['post__in'] ) ) {
+				$query->set( 'post__in', array_map( 'intval', (array) $catalog['post__in'] ) );
+			}
+			if ( ! empty( $catalog['tax_query'] ) ) {
+				$query->set( 'tax_query', array_merge( (array) $query->get( 'tax_query' ), array( $catalog['tax_query'] ) ) );
+			}
 			$query->set(
 				'meta_query',
 				array_merge(
@@ -709,9 +781,9 @@ class Health implements Registerable {
 			return;
 		}
 		$text = '';
-		if ( isset( $_GET['ndvr_unreviewed'] ) ) {
+		if ( isset( $_GET['ndvr_unreviewed'] ) && '1' === sanitize_key( wp_unslash( $_GET['ndvr_unreviewed'] ) ) ) {
 			$text = __( 'Showing catalog products without reviews.', 'rosette-reviews' );
-		} elseif ( isset( $_GET['ndvr_stale'] ) ) {
+		} elseif ( isset( $_GET['ndvr_stale'] ) && '1' === sanitize_key( wp_unslash( $_GET['ndvr_stale'] ) ) ) {
 			$text = __( 'Showing products that sold recently but have no recent review.', 'rosette-reviews' );
 		}
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended

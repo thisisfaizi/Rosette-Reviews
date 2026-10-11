@@ -255,7 +255,7 @@ class Page implements Registerable {
 		}
 		if ( ! empty( $_GET['star'] ) ) {
 			// 'low' is 1 to 3 stars (RR-24).
-			$out['star'] = 'low' === $_GET['star'] ? 'low' : absint( $_GET['star'] );
+			$out['star'] = 'low' === sanitize_key( wp_unslash( $_GET['star'] ) ) ? 'low' : absint( $_GET['star'] );
 		}
 		if ( isset( $_GET['s'] ) && '' !== $_GET['s'] ) {
 			$out['s'] = sanitize_text_field( wp_unslash( $_GET['s'] ) );

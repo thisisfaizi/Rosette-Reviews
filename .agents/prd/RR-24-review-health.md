@@ -1,8 +1,17 @@
 # RR-24: Review health on the Overview
 
-Status: built (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **15** (rev 4) (RR-00 F3b; planned build order, final at merge) · **Innovation:** competitors show volumes; nobody shows coverage and staleness self-hosted.
+Status: built (rev 5) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **15** (rev 4) (RR-00 F3b; planned build order, final at merge) · **Innovation:** competitors show volumes; nobody shows coverage and staleness self-hosted.
 
 Review findings applied: round 2 RR-24 items 1 (indexed date bound), 2 (debounced recompute, cheap trend, light fallback) and 3 (benchmarks logged, not gated).
+
+Rev 5 (code review `reviews/code-RR-24.md` applied):
+- **List (M1, m11):** `ndvr_unreviewed=1` applies the catalog's `post_status`, `post__in` and `tax_query` (drafts and private products no longer appear); the notice checks the same values.
+- **Freshness (M2, m6, m7):** the Overview reschedules whenever the stored copy is stale or 12 hours old (a job lost to deactivation or a failure no longer freezes the card); a change made while the job runs keeps the new copy stale; `mark_stale()` works once per request (bulk moderation) and also runs for comments saved already approved on a product (store replies, imports).
+- **Sales (m1, m4, m5, m8, m9):** refunds are not sales (`s.parent_id = 0`, `type => shop_order`); stats statuses are cut to WooCommerce's 20 characters; table names compare case-insensitively; the fallback keeps its last complete set for a week and rebuilds after 12 hours without blanking the card ("Checking recent sales" only on the very first run); sold products' posts are primed before pool resolution.
+- **Scope (m2):** the recent rating and the low-review replies cover the catalog, like the all-time figure.
+- **Copy (m10, m12):** "No sales in the recent window, so nothing to check." / "No product that sold recently has gone without a review …"; the arrow compares the one-decimal figures the card shows; `star` is sanitized; the CSS has its own comment.
+- **Deferred (m3):** Pro product-group members (RR-19) count as "without reviews" in Coverage; RR-19 owns the group map and adjusts Coverage when it is built.
+- **Tests:** rr-24.php 22/22 (adds refunds, a variation sale, drafts in the list, each trigger, the stale/12-hour reschedule, the change-during-job case, the All Reviews low filter, `$pagenow`, the dry-run transients and hooks).
 
 Rev 4 (reconciled with the code after RR-11 to RR-23, before building):
 - **API level:** RR-20 to RR-23 took 11 to 14, so this feature raises `NDVR_API` to **15** (every "13" in §5/§6 means 15).

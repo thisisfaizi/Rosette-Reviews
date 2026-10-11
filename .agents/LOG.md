@@ -997,3 +997,10 @@ EVIDENCE: rr-24 16/16; mutations 20/21 killed (1 no-op); AC8 benchmark 267–354
 - PRD rev 4 reconciled (NDVR_API 16; line numbers; settings through F6 on a new `seo` card inside SEO & Advanced; brand
   sources listed; QA-site tests instead of Playground).
 EVIDENCE: rr-25 13/13; mutations 11/11 killed. RR-25P-1 (Pro feed identifiers) optional, not built.
+
+## 2026-10-11 — RR-24 code review fixed → done
+- Review `prd/reviews/code-RR-24.md` (0 B, 2 M, 12 m, 11 T): list shows published catalog products only (M1); stale or old
+  copies always reschedule (M2); refunds excluded, status length, table-name case, fallback cache kept a week, pool
+  priming, catalog-scoped recent rating/replies, once-per-request marking plus approved inserts, change-during-job,
+  copy and sanitizing (m1, m2, m4–m12). m3 (group members in Coverage) deferred to RR-19. PRD rev 5.
+EVIDENCE: rr-24 22/22; fix mutations 9/9 killed (refund case needs a partial refund: a full one is already excluded by its status). Pro: Pooling skips loading non-variations (m9).

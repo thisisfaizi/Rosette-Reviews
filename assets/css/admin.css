@@ -538,7 +538,7 @@ body.ndvr-admin .ndvr-kpi {
 	text-decoration: none;
 }
 body.ndvr-admin a.ndvr-kpi:hover { border-color: var(--ndvr-slate); }
-/* Overview chips under the KPI row (RR-14 "Reported: n"). */
+/* Review health (RR-24) */
 body.ndvr-admin .ndvr-health { margin: 0 0 16px; }
 body.ndvr-admin .ndvr-health-updated { margin: 0 0 8px; color: var(--ndvr-slate); }
 body.ndvr-admin .ndvr-health-rows { margin: 0; }
@@ -550,6 +550,7 @@ body.ndvr-admin .ndvr-health-row dd a { margin-left: 8px; }
 body.ndvr-admin .ndvr-health-names { display: block; margin-top: 4px; color: var(--ndvr-slate); }
 body.ndvr-admin .ndvr-health-arrow { margin-left: 4px; color: #b32d2e; font-weight: 600; }
 @media (max-width: 600px) { body.ndvr-admin .ndvr-health-row { grid-template-columns: 1fr; } }
+/* Overview chips under the KPI row (RR-14 "Reported: n"). */
 body.ndvr-admin .ndvr-dash-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
 body.ndvr-admin .ndvr-dash-chip { display: inline-flex; align-items: center; min-height: 32px; padding: 0 14px; border: 1px solid var(--ndvr-line); border-radius: 999px; background: #fff; color: var(--ndvr-ink); font-weight: 600; text-decoration: none; }
 body.ndvr-admin .ndvr-dash-chip.is-alert { border-color: #d63638; color: #b32d2e; }

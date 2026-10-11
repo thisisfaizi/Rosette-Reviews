@@ -271,7 +271,7 @@ class ListTable extends \WP_List_Table {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended
 		$product = isset( $_GET['product_id'] ) ? absint( $_GET['product_id'] ) : 0;
 		$star    = isset( $_GET['star'] ) ? absint( $_GET['star'] ) : 0;
-		$low     = isset( $_GET['star'] ) && 'low' === $_GET['star'];
+		$low     = isset( $_GET['star'] ) && 'low' === sanitize_key( wp_unslash( $_GET['star'] ) );
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		?>
 		<div class="alignleft actions">
@@ -300,7 +300,7 @@ class ListTable extends \WP_List_Table {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended
 		$product = isset( $_GET['product_id'] ) ? absint( $_GET['product_id'] ) : 0;
 		$star    = isset( $_GET['star'] ) ? absint( $_GET['star'] ) : 0;
-		$low     = isset( $_GET['star'] ) && 'low' === $_GET['star'];
+		$low     = isset( $_GET['star'] ) && 'low' === sanitize_key( wp_unslash( $_GET['star'] ) );
 		$search  = isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( $_GET['s'] ) ) : '';
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
