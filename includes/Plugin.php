@@ -265,6 +265,13 @@ final class Plugin {
 		);
 
 		$c->set(
+			'health',
+			static function () {
+				return new \NdvReviews\Admin\Health();
+			}
+		);
+
+		$c->set(
 			'purchase_dates',
 			static function () {
 				return new \NdvReviews\Reviews\PurchaseDates();
@@ -594,6 +601,7 @@ final class Plugin {
 			$this->container->get( 'integrity' ),
 			$this->container->get( 'recovery' ),
 			$this->container->get( 'purchase_dates' ),
+			$this->container->get( 'health' ),
 			$this->container->get( 'review_edits' ),
 			$this->container->get( 'myaccount_reviews' ),
 			$this->container->get( 'pending_edits' ),

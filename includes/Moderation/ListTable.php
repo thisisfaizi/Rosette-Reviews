@@ -271,12 +271,14 @@ class ListTable extends \WP_List_Table {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended
 		$product = isset( $_GET['product_id'] ) ? absint( $_GET['product_id'] ) : 0;
 		$star    = isset( $_GET['star'] ) ? absint( $_GET['star'] ) : 0;
+		$low     = isset( $_GET['star'] ) && 'low' === $_GET['star'];
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		?>
 		<div class="alignleft actions">
 			<input type="number" name="product_id" value="<?php echo $product ? esc_attr( $product ) : ''; ?>" placeholder="<?php esc_attr_e( 'Product ID', 'rosette-reviews' ); ?>" style="width:110px;" />
 			<select name="star">
 				<option value="0"><?php esc_html_e( 'All ratings', 'rosette-reviews' ); ?></option>
+				<option value="low" <?php selected( $low ); ?>><?php esc_html_e( '1 to 3 ★', 'rosette-reviews' ); ?></option>
 				<?php for ( $s = 5; $s >= 1; $s-- ) : ?>
 					<option value="<?php echo esc_attr( $s ); ?>" <?php selected( $star, $s ); ?>><?php echo esc_html( $s ); ?> ★</option>
 				<?php endfor; ?>
@@ -298,6 +300,7 @@ class ListTable extends \WP_List_Table {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended
 		$product = isset( $_GET['product_id'] ) ? absint( $_GET['product_id'] ) : 0;
 		$star    = isset( $_GET['star'] ) ? absint( $_GET['star'] ) : 0;
+		$low     = isset( $_GET['star'] ) && 'low' === $_GET['star'];
 		$search  = isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( $_GET['s'] ) ) : '';
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
@@ -318,12 +321,12 @@ class ListTable extends \WP_List_Table {
 		if ( '' !== $search ) {
 			$args['search'] = $search;
 		}
-		if ( $star >= 1 && $star <= 5 ) {
+		if ( $low || ( $star >= 1 && $star <= 5 ) ) {
 			$args['meta_query'] = array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
 				array(
 					'key'     => 'rating',
-					'value'   => $star,
-					'compare' => '=',
+					'value'   => $low ? array( 1, 3 ) : $star,
+					'compare' => $low ? 'BETWEEN' : '=',
 					'type'    => 'NUMERIC',
 				),
 			);

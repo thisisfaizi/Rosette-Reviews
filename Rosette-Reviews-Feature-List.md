@@ -98,6 +98,8 @@ Free:
   rating, private cases with a note and an Open cases view on any review; publishing is never affected.
 - "Reviewed 3 weeks after purchase" on verified reviews (from the reviewer's own paid order; one-time background
   backfill; setting to hide it).
+- Review health card on the Overview: coverage (with a "products without reviews" list), going stale (sold in 90 days, no
+  review in 12 months), replies to low reviews, recent vs all-time rating; computed in the background.
 - Review search in the reviews tab (products with 10+ reviews): text and titles only, highlighted, announced, with filters,
   works without JS.
 

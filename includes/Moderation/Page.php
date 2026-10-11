@@ -254,7 +254,8 @@ class Page implements Registerable {
 			$out['product_id'] = absint( $_GET['product_id'] );
 		}
 		if ( ! empty( $_GET['star'] ) ) {
-			$out['star'] = absint( $_GET['star'] );
+			// 'low' is 1 to 3 stars (RR-24).
+			$out['star'] = 'low' === $_GET['star'] ? 'low' : absint( $_GET['star'] );
 		}
 		if ( isset( $_GET['s'] ) && '' !== $_GET['s'] ) {
 			$out['s'] = sanitize_text_field( wp_unslash( $_GET['s'] ) );

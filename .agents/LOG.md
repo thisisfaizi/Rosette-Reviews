@@ -980,3 +980,15 @@ EVIDENCE: rr-22 58/58; Pro rr-22p 3/3; fix mutations 16/17 killed (1 equivalent)
   backfill scheduling on AJAX, unique enqueues (m2); Elementor sample, selectors and gate (m3–m5); comment, unused
   dependency, readme privacy bullets (also RR-21/RR-22), CSS separator (m6–m9). PRD rev 5.
 EVIDENCE: rr-23 22/22; Pro rr-23p 2/2; fix mutations 5/5 killed. HPOS on/off and Elementor: OC-14.
+
+## 2026-10-11 — Follow-up noted (Pro, not RR-23)
+- The RR-23 reviewer traced (did not run) a Pro ESP customer token for a guest order: `Esp\Dispatcher` creates it with
+  customer id 0, Landing then has no email (`token_email()`), and `create()` refuses the review. To verify and fix as
+  task PRO-ESP-1 after RR-25.
+
+## 2026-10-11 — RR-24 review health built → in_review
+- PRD rev 4 reconciled (NDVR_API 15; hook at DashboardPage.php:499; build spike on the QA site: the analytics lookup
+  tables fill asynchronously, so "unavailable" includes "empty while paid orders exist"; benchmark on SQLite).
+  All Reviews gained `star=low` (1–3 ★). Pro RR-24P-1: AdminReply returns `_ndvr_admin_reply` for the reply rate.
+EVIDENCE: rr-24 16/16; mutations 20/21 killed (1 no-op); AC8 benchmark 267–354 ms for 1,000 products / 20,000 reviews
+  on the SQLite QA site (target 300 ms, background job, not a gate).

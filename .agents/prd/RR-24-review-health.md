@@ -1,8 +1,20 @@
 # RR-24: Review health on the Overview
 
-Status: prd-ok (rev 3) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **13** (RR-00 F3b; planned build order, final at merge) · **Innovation:** competitors show volumes; nobody shows coverage and staleness self-hosted.
+Status: built (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **15** (rev 4) (RR-00 F3b; planned build order, final at merge) · **Innovation:** competitors show volumes; nobody shows coverage and staleness self-hosted.
 
 Review findings applied: round 2 RR-24 items 1 (indexed date bound), 2 (debounced recompute, cheap trend, light fallback) and 3 (benchmarks logged, not gated).
+
+Rev 4 (reconciled with the code after RR-11 to RR-23, before building):
+- **API level:** RR-20 to RR-23 took 11 to 14, so this feature raises `NDVR_API` to **15** (every "13" in §5/§6 means 15).
+- **Hook:** `ndv-reviews/dashboard/after_kpis` is at DashboardPage.php:499 (fires with `$stats`). The card hooks priority 5; RR-21's "High-risk reviews waiting" chip (priority 10) and Pro panels follow. Markup reuses `section.ndvr-card` with `.ndvr-card-header h2`.
+- **Capability:** the Overview uses `Caps::manage( 'overview' )`; the product-list query vars check the same.
+- **Build spike, done on the QA site (WooCommerce 11.2.0, Action Scheduler 4.1.0, posts order storage):** `wc_order_product_lookup` and `wc_order_stats` exist and fill **asynchronously** (Action Scheduler `wc-admin_import_single_order` after the order save), so a fresh order is not in them at once; the option `woocommerce_analytics_enabled` exists ('yes' here). "Unavailable" therefore means: a table is missing, analytics is 'no', or `wc_order_stats` has no row in the window while `wc_get_orders( limit 1 )` finds a paid order. The harness tests the primary source by writing lookup rows itself, and the fallback by leaving them empty.
+- **Benchmark:** recorded on the SQLite QA site (no Playground on this machine), seeded with direct SQL; the figure is logged, not gated.
+- **Stale list:** the computed data keeps the stale product ids (`stale_ids`) for `ndvr_stale=1`; the card names at most 20.
+- **Reply rate (free):** a native reply is an approved child comment whose author can `moderate_comments`. Pro task RR-24P-1 (the `_ndvr_admin_reply` filter) is built with this feature.
+- **Low-review link:** All Reviews' star filter takes `star=low` (1 to 3 stars, a new "1 to 3 ★" option); the reply row links there.
+- **As built:** `Admin\Health` (service `health`): `compute()` reads the catalog ids once (`health_catalog_args`) and counts coverage over them in chunks of 500 rather than two `COUNT` queries; the rows carry their text (built in the job, in the site language) and the card prints them; the trend shows both averages with one decimal (the stored row keeps `overall` exact). The fallback job keeps its running product set in transient `ndvr_health_sales_partial` between pages. The product list shows a notice for both query vars.
+- **Tests:** rr-24.php 16/16 (AC1–AC12 plus the ndvr_stale list; mutations 20/21 killed, the survivor a no-op; AC6 compares each case with the same list without the query var, because WooCommerce adjusts its own main product-list query). Benchmark (AC8, SQLite QA site, 1,000 products / 20,000 reviews): 267–354 ms across runs (target 300 ms; background job, not a gate).
 
 ## 1. Problem and who it's for
 Merchants don't know where reviews are missing or going stale. A product with three reviews from 2023 sells worse than its rating suggests. The Overview (`Admin\DashboardPage`) shows queue and stats, not health. This is for store owners deciding where to ask for reviews next.

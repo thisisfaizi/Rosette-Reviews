@@ -396,3 +396,10 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   Pro RR-23P-1: Elementor "Review Date" part switch `ownership` (on) at `free_api( 14 )`. Rev 5: `purchased_at` is '' unless
   verified and `ownership_time` is on; Pro REST items carry `ownership_text` instead of `purchased_at`; `PurchaseDates` has
   no constructor arguments.
+- RR-24 (NDVR_API 15): service `health` = `Admin\Health` (`compute()`, `recompute()`, `mark_stale()`, `recent_sales()`,
+  `sales_job( $page )`, static `catalog_args()`). Option `ndv_reviews_health` (autoload no: `measures`, `stale_ids`,
+  `sales_pending`, `computed_at`, `computed_ts`, `stale`). Transients `ndvr_health_sales`, `ndvr_health_sales_partial`. AS hooks
+  `ndvr_health_recompute` (one pending, an hour after the last run), `ndvr_health_recent_sales` (arg: page). Filters
+  `health_stale_days` (365), `health_recent_days` (90), `health_response_meta` (''), `health_measures`, `health_catalog_args`.
+  Product list vars `ndvr_unreviewed=1`, `ndvr_stale=1`. All Reviews `star=low` (1–3). Pro RR-24P-1: `AdminReply` returns
+  `_ndvr_admin_reply` from `health_response_meta`.
