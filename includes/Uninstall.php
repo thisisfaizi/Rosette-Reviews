@@ -67,6 +67,7 @@ final class Uninstall {
 				'ndvr_request_stats_',
 				'ndvr_order_action_notice_',
 				'ndvr_edit_saved_', // RR-22.
+				'ndvr_recovery_notice_',
 			),
 			'comment_meta'          => array(
 				'_ndvr_risk',

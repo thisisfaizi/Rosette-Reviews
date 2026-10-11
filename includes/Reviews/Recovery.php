@@ -32,6 +32,8 @@ class Recovery implements Registerable {
 	const VIEW          = 'open_cases';
 	const LOCK_PREFIX   = 'ndv_reviews_invite_lock_';
 	const SAVED_PREFIX  = 'ndvr_edit_saved_';
+	const SUPPORT_MAX   = 200;
+	const NOTICE_PREFIX = 'ndvr_recovery_notice_';
 	const INVITE_TTL    = 14 * DAY_IN_SECONDS;
 	const NOTE_MAX      = 2000;
 	const MESSAGE_MAX   = 300;
@@ -48,6 +50,13 @@ class Recovery implements Registerable {
 	 * @var Settings
 	 */
 	private $settings;
+
+	/**
+	 * Why the last invite() didn't send ('' after a send).
+	 *
+	 * @var string
+	 */
+	private $last_error = '';
 
 	/**
 	 * Constructor.
@@ -77,6 +86,7 @@ class Recovery implements Registerable {
 		add_filter( 'ndv-reviews/transparency_facts', array( $this, 'transparency_facts' ) );
 		add_filter( 'ndv-reviews/transparency_sentences', array( $this, 'transparency' ) );
 		add_filter( 'wp_privacy_personal_data_exporters', array( $this, 'register_exporter' ) );
+		add_action( 'admin_notices', array( $this, 'show_notice' ) );
 	}
 
 	// ── Settings ─────────────────────────────────────────────────────────
@@ -134,7 +144,9 @@ class Recovery implements Registerable {
 	}
 
 	/**
-	 * An email or a page URL.
+	 * An email (a leading "mailto:" is dropped), a page address starting with
+	 * http:// or https://, or short plain text such as a phone number. It is
+	 * only ever shown as text in the support message.
 	 *
 	 * @param mixed $raw Posted value.
 	 * @return string
@@ -144,11 +156,15 @@ class Recovery implements Registerable {
 		if ( '' === $raw ) {
 			return '';
 		}
-		if ( is_email( $raw ) ) {
-			return sanitize_email( $raw );
+		$mail = (string) preg_replace( '#^mailto:#i', '', $raw );
+		if ( is_email( $mail ) ) {
+			return sanitize_email( $mail );
+		}
+		if ( preg_match( '#^https?://#i', $raw ) ) {
+			return esc_url_raw( $raw, array( 'http', 'https' ) );
 		}
 
-		return esc_url_raw( $raw, array( 'http', 'https' ) );
+		return mb_substr( sanitize_text_field( $raw ), 0, self::SUPPORT_MAX );
 	}
 
 	/**
@@ -196,8 +212,9 @@ class Recovery implements Registerable {
 			<?php if ( self::invites_available() ) : ?>
 				<?php \NdvReviews\Admin\SettingsFields::marker( 'recovery_invites' ); ?>
 				<p><label><input type="checkbox" name="recovery_invites" value="1" <?php checked( ! empty( $values['recovery_invites'] ) ); ?> /> <?php esc_html_e( 'Allow invitations to update a review', 'rosette-reviews' ); ?></label></p>
+				<p class="description"><?php esc_html_e( 'You can send an invitation only after you mark a case resolved. It goes out once, says that updating is optional, and offers nothing in return. An update appears only after you check it, and the review is then marked "Edited". Rules on contacting reviewers differ between countries. Get legal advice before you use invitations.', 'rosette-reviews' ); ?></p>
 			<?php endif; ?>
-			<p class="description" id="ndvr-recovery-help"><?php esc_html_e( 'Alerts and the support message go out for every review at or below the rating you choose. They don\'t change whether or when a review is published. You can open a case on any review, whatever its rating, and send an invitation only after you mark that case resolved. It goes out once, says that updating is optional, and offers nothing in return. An update appears only after you check it, and the review is then marked "Edited". Rules on contacting reviewers differ between countries. Get legal advice before you use invitations.', 'rosette-reviews' ); ?></p>
+			<p class="description" id="ndvr-recovery-help"><?php esc_html_e( 'Alerts and the support message go out for every review at or below the rating you choose. They don\'t change whether or when a review is published. You can open a case on any review, whatever its rating.', 'rosette-reviews' ); ?></p>
 		</fieldset>
 		<?php
 	}
@@ -310,7 +327,7 @@ class Recovery implements Registerable {
 		unset( $data );
 		$comment_id = (int) $comment_id;
 		$comment    = get_comment( $comment_id );
-		if ( ! $comment || ! $this->is_low( $comment_id ) ) {
+		if ( ! $comment || in_array( (string) $comment->comment_approved, array( 'spam', 'trash' ), true ) || ! $this->is_low( $comment_id ) ) {
 			return;
 		}
 		$rating = self::rating( $comment_id );
@@ -365,7 +382,7 @@ class Recovery implements Registerable {
 				$html .= '<p><a href="' . esc_url( $order->get_edit_order_url() ) . '">' . esc_html( sprintf( __( 'Order #%s', 'rosette-reviews' ), $order->get_order_number() ) ) . '</a></p>';
 			}
 		}
-		$html .= '<p>' . esc_html__( 'Nothing changes for this review because of this alert: it is moderated like any other. You can open a case on it from All Reviews.', 'rosette-reviews' ) . '</p>';
+		$html .= '<p>' . esc_html__( 'Nothing changes for this review because of this alert: it is moderated like any other review.', 'rosette-reviews' ) . '</p>';
 
 		Plugin::instance()->container()->get( 'mailer' )->send_notice(
 			$to,
@@ -495,8 +512,10 @@ class Recovery implements Registerable {
 	 */
 	public function invite( $comment_id ) {
 		global $wpdb;
-		$comment_id = (int) $comment_id;
+		$comment_id       = (int) $comment_id;
+		$this->last_error = '';
 		if ( ! $this->can_invite( $comment_id ) ) {
+			$this->last_error = __( 'This review can\'t be invited.', 'rosette-reviews' );
 			return false;
 		}
 		// add_option() isn't atomic; a raw INSERT IGNORE is (as the upgrade lock).
@@ -504,6 +523,7 @@ class Recovery implements Registerable {
 		$won = (int) $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", self::LOCK_PREFIX . $comment_id, (string) time() ) );
 		wp_cache_delete( 'notoptions', 'options' );
 		if ( 1 !== $won ) {
+			$this->last_error = __( 'An invitation for this review is already being sent.', 'rosette-reviews' );
 			return false;
 		}
 
@@ -511,26 +531,44 @@ class Recovery implements Registerable {
 	}
 
 	/**
-	 * The send after the lock: re-read invited_at, then token, meta and email.
+	 * Give the send claim back (nothing was sent, so the store can retry).
+	 *
+	 * @param int    $comment_id Review.
+	 * @param string $why        Reason shown to the store.
+	 * @return false
+	 */
+	private function release( $comment_id, $why ) {
+		delete_comment_meta( (int) $comment_id, self::INVITED_META );
+		delete_option( self::LOCK_PREFIX . (int) $comment_id );
+		$this->last_error = (string) $why;
+
+		return false;
+	}
+
+	/**
+	 * The send after the lock (only invite() calls it, after the claim):
+	 * re-read invited_at, then token, meta and email.
 	 *
 	 * @param int $comment_id Review.
 	 * @return bool Sent.
 	 */
-	public function send_invite( $comment_id ) {
+	private function send_invite( $comment_id ) {
 		$comment_id = (int) $comment_id;
 		wp_cache_delete( $comment_id, 'comment_meta' );
 		if ( '' !== (string) get_comment_meta( $comment_id, self::INVITED_META, true ) ) {
+			// Already sent: the claim stays (PRD §8).
+			$this->last_error = __( 'An invitation was already sent for this review.', 'rosette-reviews' );
 			return false;
 		}
 		$comment = get_comment( $comment_id );
 		$email   = $comment ? Sources::trusted_email( $comment ) : '';
 		if ( '' === $email ) {
-			return false;
+			return $this->release( $comment_id, __( 'This review has no email address the store can trust.', 'rosette-reviews' ) );
 		}
 		$c     = Plugin::instance()->container();
 		$token = $c->get( 'token_repository' )->create_edit_token( $comment_id, $email, (int) $comment->user_id );
 		if ( empty( $token['raw'] ) ) {
-			return false;
+			return $this->release( $comment_id, __( 'The invitation link could not be created. Please try again.', 'rosette-reviews' ) );
 		}
 		update_comment_meta( $comment_id, self::INVITED_META, current_time( 'mysql', true ) );
 
@@ -559,10 +597,8 @@ class Recovery implements Registerable {
 		if ( true !== $sent ) {
 			// Not sent (unsubscribed, mail error): nothing was promised, so let
 			// the store try again later. The unused link is revoked.
-			delete_comment_meta( $comment_id, self::INVITED_META );
-			delete_option( self::LOCK_PREFIX . $comment_id );
 			$c->get( 'token_repository' )->set_status( (int) $token['id'], 'revoked' );
-			return false;
+			return $this->release( $comment_id, is_wp_error( $sent ) ? $sent->get_error_message() : __( 'The invitation email could not be sent.', 'rosette-reviews' ) );
 		}
 
 		/**
@@ -614,7 +650,10 @@ class Recovery implements Registerable {
 	public function open_total() {
 		global $wpdb;
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
-		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->commentmeta} m INNER JOIN {$wpdb->comments} c ON c.comment_ID = m.comment_id WHERE m.meta_key = %s AND m.meta_value = 'open' AND c.comment_approved IN ('0','1')", self::STATUS_META ) );
+		$types = PostTypes::all();
+		$in    = implode( ',', array_fill( 0, count( $types ), '%s' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in is placeholders only.
+		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->commentmeta} m INNER JOIN {$wpdb->comments} c ON c.comment_ID = m.comment_id INNER JOIN {$wpdb->posts} p ON p.ID = c.comment_post_ID WHERE m.meta_key = %s AND m.meta_value = 'open' AND c.comment_approved IN ('0','1') AND c.comment_type IN ('review','comment') AND p.post_type IN ({$in})", array_merge( array( self::STATUS_META ), $types ) ) );
 	}
 
 	/**
@@ -685,7 +724,15 @@ class Recovery implements Registerable {
 					}
 					break;
 				case 'recovery_invite':
-					$this->invite( $id );
+					$sent = $this->invite( $id );
+					set_transient(
+						self::NOTICE_PREFIX . get_current_user_id(),
+						array(
+							'ok'   => $sent,
+							'text' => $sent ? __( 'Invitation sent.', 'rosette-reviews' ) : $this->last_error,
+						),
+						MINUTE_IN_SECONDS
+					);
 					break;
 			}
 		}
@@ -812,23 +859,39 @@ class Recovery implements Registerable {
 			}
 			return self::card( __( 'Link already used', 'rosette-reviews' ), __( 'This link has already been used.', 'rosette-reviews' ) );
 		}
+		// Invitations were turned off: outstanding links stop with them, so the
+		// transparency notice (which drops the invitation sentence) stays true.
+		if ( ! $this->invites_on() ) {
+			return self::card( __( 'This link is no longer available', 'rosette-reviews' ), __( 'Updating your review through this link is no longer available. Contact the store if you\'d still like to change it.', 'rosette-reviews' ) );
+		}
 		$valid = 'active' === $row->status && ( empty( $row->expires_at ) || strtotime( $row->expires_at . ' UTC' ) >= time() );
 		if ( ! $valid || ! $this->owns( $row, $id ) ) {
 			if ( 'active' === $row->status && ! empty( $row->expires_at ) && strtotime( $row->expires_at . ' UTC' ) < time() ) {
 				$tokens->set_status( (int) $row->id, 'expired' );
 			}
-			return self::card( __( 'This link has expired', 'rosette-reviews' ), __( 'Your review link is no longer valid. If you still have items to review, please request a fresh link or contact the store.', 'rosette-reviews' ) );
+			return self::card( __( 'This link has expired', 'rosette-reviews' ), __( 'This link is no longer valid. Contact the store if you\'d still like to update your review.', 'rosette-reviews' ) );
+		}
+		// A review moved to spam or trash after the invitation can't be saved.
+		if ( true !== $c->get( 'reviews' )->editable( $id, $this->auth( $row, $id ), 'invite' ) ) {
+			return self::card( __( 'This review can no longer be updated', 'rosette-reviews' ), __( 'This review can no longer be updated. Contact the store if you have a question.', 'rosette-reviews' ) );
 		}
 
 		$error = '';
+		$draft = array();
 		// phpcs:disable WordPress.Security.NonceVerification.Missing -- verified below, first.
 		if ( isset( $_POST[ \NdvReviews\Account\MyAccountReviews::SAVE_FIELD ], $_POST['review_id'] ) ) {
-			$error = $this->save( $row, $raw, $id );
+			$saved = $this->save( $row, $raw, $id );
+			if ( ! empty( $saved['used'] ) ) {
+				return self::card( __( 'Link already used', 'rosette-reviews' ), __( 'This link has already been used.', 'rosette-reviews' ) );
+			}
+			$error = $saved['error'];
+			$draft = $saved['draft'];
 		}
 		// phpcs:enable WordPress.Security.NonceVerification.Missing
 
 		$action = $c->get( 'mailer' )->build_link( $raw );
-		$form   = \NdvReviews\Account\MyAccountReviews::edit_form( $id, $action, home_url( '/' ) );
+		// What the customer typed comes back after an error (as My Account does).
+		$form = \NdvReviews\Account\MyAccountReviews::edit_form( $id, $action, home_url( '/' ), $draft );
 
 		return '<div class="ndvr-collect-card ndvr-edit-invite">'
 			. '<h1>' . esc_html__( 'Update your review', 'rosette-reviews' ) . '</h1>'
@@ -858,13 +921,29 @@ class Recovery implements Registerable {
 	}
 
 	/**
+	 * The update() auth for a token: the account, else the review's email.
+	 *
+	 * @param object $row Token row.
+	 * @param int    $id  Review.
+	 * @return array<string,mixed>
+	 */
+	private function auth( $row, $id ) {
+		$comment = get_comment( $id );
+		if ( ! $comment ) {
+			return array();
+		}
+
+		return ! empty( $row->customer_id ) ? array( 'user_id' => (int) $comment->user_id ) : array( 'email' => (string) $comment->comment_author_email );
+	}
+
+	/**
 	 * Save the invited update (PRD §8 order): nonce, honeypot, re-check,
-	 * claim the token, update(); redirect on success.
+	 * rate limit, claim the token, update(); redirect on success.
 	 *
 	 * @param object $row Token row.
 	 * @param string $raw Raw token.
 	 * @param int    $id  Review.
-	 * @return string An error to show ('' never returns: success redirects).
+	 * @return array{error:string,draft:array,used:bool} Success redirects instead.
 	 */
 	private function save( $row, $raw, $id ) {
 		$c      = Plugin::instance()->container();
@@ -875,21 +954,32 @@ class Recovery implements Registerable {
 		$input = wp_unslash( $_POST );
 		// phpcs:enable WordPress.Security.NonceVerification.Missing
 		$input = is_array( $input ) ? $input : array();
+		$fail  = static function ( $message, array $draft = array(), $used = false ) {
+			return array(
+				'error' => (string) $message,
+				'draft' => $draft,
+				'used'  => (bool) $used,
+			);
+		};
 		if ( $post !== $id || ! wp_verify_nonce( $nonce, 'ndvr_edit_review_' . $id ) ) {
-			return __( 'Your session expired. Reload the page and try again.', 'rosette-reviews' );
+			return $fail( __( 'Your session expired. Reload the page and try again.', 'rosette-reviews' ) );
 		}
 		if ( ! $c->get( 'antispam' )->honeypot_ok( $input ) ) {
-			return __( 'Your changes could not be saved.', 'rosette-reviews' );
+			return $fail( __( 'Your changes could not be saved.', 'rosette-reviews' ) );
 		}
 		$fresh = $tokens->resolve( $raw );
 		if ( ! $fresh || 'edit' !== $fresh->type || ! $this->owns( $fresh, $id ) ) {
-			return __( 'This link has already been used.', 'rosette-reviews' );
+			return $fail( '', array(), true );
+		}
+		// The link holder can't retry failing saves without limit (as My Account).
+		$limit = $c->get( 'antispam' )->rate_limit( 'edit_t' . (int) $fresh->id, \NdvReviews\Account\MyAccountReviews::RATE_MAX );
+		if ( is_wp_error( $limit ) ) {
+			return $fail( $limit->get_error_message() );
 		}
 		if ( ! $tokens->consume( (int) $fresh->id ) ) {
-			return __( 'This link has already been used.', 'rosette-reviews' );
+			return $fail( '', array(), true );
 		}
-		$comment = get_comment( $id );
-		$data    = array(
+		$data = array(
 			'content'         => isset( $input['ndvr_content'] ) && is_string( $input['ndvr_content'] ) ? $input['ndvr_content'] : '',
 			'title'           => isset( $input['ndvr_title'] ) && is_string( $input['ndvr_title'] ) ? $input['ndvr_title'] : '',
 			'criteria'        => isset( $input['ndvr_criteria'] ) && is_array( $input['ndvr_criteria'] ) ? $input['ndvr_criteria'] : array(),
@@ -902,12 +992,22 @@ class Recovery implements Registerable {
 		if ( isset( $input['ndvr_rating'] ) && is_scalar( $input['ndvr_rating'] ) ) {
 			$data['rating'] = (string) $input['ndvr_rating'];
 		}
-		$auth   = ! empty( $fresh->customer_id ) ? array( 'user_id' => (int) $comment->user_id ) : array( 'email' => (string) $comment->comment_author_email );
-		$result = $c->get( 'reviews' )->update( $id, $data, $auth );
+		$result = $c->get( 'reviews' )->update( $id, $data, $this->auth( $fresh, $id ) );
 		if ( is_wp_error( $result ) ) {
-			// Let the customer correct it with the same link.
-			$tokens->set_status( (int) $fresh->id, 'active' );
-			return $result->get_error_message();
+			// Let the customer correct it with the same link, keeping what they typed.
+			$tokens->release( (int) $fresh->id );
+
+			return $fail(
+				$result->get_error_message(),
+				array(
+					'content'      => wp_kses( (string) $data['content'], 'pre_comment_content' ),
+					'title'        => sanitize_text_field( (string) $data['title'] ),
+					'criteria'     => array_map( 'floatval', (array) $data['criteria'] ),
+					'rating'       => isset( $data['rating'] ) ? absint( $data['rating'] ) : 0,
+					'answers'      => array_map( 'sanitize_text_field', array_filter( (array) $data['answers'], 'is_scalar' ) ),
+					'remove_media' => $data['remove_media'],
+				)
+			);
 		}
 		set_transient( self::SAVED_PREFIX . (int) $fresh->id, 1, MINUTE_IN_SECONDS );
 		wp_safe_redirect( add_query_arg( 'ndvr_edit_saved', '1', $c->get( 'mailer' )->build_link( $raw ) ) );
@@ -989,17 +1089,38 @@ class Recovery implements Registerable {
 				'status'       => 'all',
 				'number'       => $number,
 				'offset'       => ( max( 1, (int) $page ) - 1 ) * $number,
-				'meta_key'     => self::STATUS_META, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+				'orderby'      => 'comment_ID',
+				'order'        => 'ASC',
+				// A note or dates can remain after the case status is cleared.
+				'meta_query'   => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+					'relation' => 'OR',
+					array(
+						'key'     => self::STATUS_META,
+						'compare' => 'EXISTS',
+					),
+					array(
+						'key'     => self::NOTE_META,
+						'compare' => 'EXISTS',
+					),
+					array(
+						'key'     => self::RESOLVED_META,
+						'compare' => 'EXISTS',
+					),
+					array(
+						'key'     => self::INVITED_META,
+						'compare' => 'EXISTS',
+					),
+				),
 				'post_type'    => PostTypes::all(),
 			)
 		);
-		$items    = array();
+		$items = array();
 		foreach ( $comments as $comment ) {
 			$id   = (int) $comment->comment_ID;
 			$data = array(
 				array(
 					'name'  => __( 'Case status', 'rosette-reviews' ),
-					'value' => self::status( $id ),
+					'value' => self::status_label( self::status( $id ) ),
 				),
 			);
 			foreach ( array(
@@ -1008,6 +1129,9 @@ class Recovery implements Registerable {
 				self::NOTE_META     => __( 'Store\'s note about this review', 'rosette-reviews' ),
 			) as $key => $label ) {
 				$value = (string) get_comment_meta( $id, $key, true );
+				if ( '' !== $value && self::NOTE_META !== $key ) {
+					$value = wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), (int) strtotime( $value . ' UTC' ) );
+				}
 				if ( '' !== $value ) {
 					$data[] = array(
 						'name'  => $label,
@@ -1027,5 +1151,38 @@ class Recovery implements Registerable {
 			'data' => $items,
 			'done' => count( $comments ) < $number,
 		);
+	}
+
+	/**
+	 * A case status for people ("No case", "Open", "Resolved").
+	 *
+	 * @param string $status open|resolved|''.
+	 * @return string
+	 */
+	public static function status_label( $status ) {
+		if ( 'open' === $status ) {
+			return __( 'Open', 'rosette-reviews' );
+		}
+
+		return 'resolved' === $status ? __( 'Resolved', 'rosette-reviews' ) : __( 'No case', 'rosette-reviews' );
+	}
+
+	/**
+	 * The result of "Invite to update", once, on the All Reviews screen.
+	 *
+	 * @return void
+	 */
+	public function show_notice() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- which screen, display only.
+		if ( ! isset( $_GET['page'] ) || ModerationPage::PAGE_SLUG !== sanitize_key( wp_unslash( $_GET['page'] ) ) ) {
+			return;
+		}
+		$key    = self::NOTICE_PREFIX . get_current_user_id();
+		$notice = get_transient( $key );
+		if ( ! is_array( $notice ) || empty( $notice['text'] ) ) {
+			return;
+		}
+		delete_transient( $key );
+		printf( '<div class="notice %1$s is-dismissible"><p>%2$s</p></div>', ! empty( $notice['ok'] ) ? 'notice-success' : 'notice-warning', esc_html( (string) $notice['text'] ) );
 	}
 }

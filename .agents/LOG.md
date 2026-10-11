@@ -964,3 +964,12 @@ EVIDENCE: rr-22 43/43; Pro rr-22p 3/3; mutations 23/24 killed (1 equivalent: sen
   token; trusted email only from a proven mailbox; done flag autoload yes; Elementor part built, RR-23P-2 not needed).
 - Pro RR-23P-1: Elementor "Review Date" part prints the label (switch, on) at free_api( 14 ).
 EVIDENCE: rr-23 14/14; mutations 21/23 killed (2 equivalent, see PRD rev 4); owner check OC-14 (Elementor).
+
+## 2026-10-11 — RR-22 code review fixed → done
+- Review `prd/reviews/code-RR-22.md` (0 B, 4 M, 13 m, 12 T): export covers notes/dates after "No case" (M1); the update
+  page keeps the customer's text after an error (M2); Pro's alert uses free's alert address and judges the stored rating
+  (M3, m9); every failed send releases the invite claim, the send is private, the store sees the result (M4, m1, m11);
+  spam/trash, disabled invitations and lost races show cards (m2, m3, m8); rate limit on the public save (m4); support
+  contact accepts a phone number (m5); the alert no longer suggests opening a case (m6); invitation help only where
+  invitations exist (m7); edit-token write checked (m10); page title, card copy, count, export labels (m13). PRD rev 7.
+EVIDENCE: rr-22 58/58; Pro rr-22p 3/3; fix mutations 16/17 killed (1 equivalent).

@@ -205,13 +205,22 @@ class TokenRepository {
 		global $wpdb;
 		$created = $this->create_row( 'edit', null, $user_id ? absint( $user_id ) : null, $email, array(), \NdvReviews\Reviews\Recovery::INVITE_TTL );
 		if ( $created['id'] ) {
-			$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$written = $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 				Db::table( 'review_tokens' ),
 				array( 'products' => wp_json_encode( array( 'comment_id' => absint( $comment_id ) ) ) ),
 				array( 'id' => (int) $created['id'] ),
 				array( '%s' ),
 				array( '%d' )
 			);
+			if ( false === $written ) {
+				// A link that doesn't know its review must never be sent.
+				$wpdb->delete( Db::table( 'review_tokens' ), array( 'id' => (int) $created['id'] ), array( '%d' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+
+				return array(
+					'raw' => '',
+					'id'  => 0,
+				);
+			}
 		}
 
 		return $created;
@@ -229,6 +238,20 @@ class TokenRepository {
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		return 1 === (int) $wpdb->query( $wpdb->prepare( "UPDATE `{$table}` SET status = 'used', used_at = %s WHERE id = %d AND status = 'active'", current_time( 'mysql', true ), absint( $id ) ) );
+	}
+
+	/**
+	 * Undo consume() after a save that failed: active again, used_at cleared.
+	 *
+	 * @param int $id Token id.
+	 * @return bool
+	 */
+	public function release( $id ) {
+		global $wpdb;
+		$table = Db::table( 'review_tokens' );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		return 1 === (int) $wpdb->query( $wpdb->prepare( "UPDATE `{$table}` SET status = 'active', used_at = NULL WHERE id = %d AND status = 'used'", absint( $id ) ) );
 	}
 
 	/**

@@ -1,10 +1,20 @@
 # RR-22: Service recovery (low-rating alerts, cases and update invitations)
 
-Status: built (rev 6) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Depends on RR-00 (F1, F4, F6, F8.1, F8.2 Pro task, F8.3, F9), RR-15 (`update()` with its edit window and invite exemption, pending revisions, prefill rule, edit form partial), RR-09 (token API pattern) · Raises `NDVR_API` to **11** (RR-00 F3b; planned build order, final at merge) · **Innovation:** no competitor combines these steps self-hosted. Parts exist elsewhere: Judge.me's support prompt, WiserReview's "ask to revise".
+Status: built (rev 7) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Depends on RR-00 (F1, F4, F6, F8.1, F8.2 Pro task, F8.3, F9), RR-15 (`update()` with its edit window and invite exemption, pending revisions, prefill rule, edit form partial), RR-09 (token API pattern) · Raises `NDVR_API` to **11** (RR-00 F3b; planned build order, final at merge) · **Innovation:** no competitor combines these steps self-hosted. Parts exist elsewhere: Judge.me's support prompt, WiserReview's "ask to revise".
 
 Review findings applied: round 2 RR-22 items 1 (legal: case and invite decoupled from the rating), 2 (edit window in `update()`, invite exemption, prefill) and 3 (`rating` key); round 3 batch B items 3 (ownership check for guest `list_link` reviews), 4 (invite lock re-reads `invited_at` and is kept), 5 (edit branch before `resolve()`, used-token and PRG states) and 7 (callers pass `submitted_at` to `apply_pending_edit()`).
 
 `ReviewRepository`, `TokenRepository` and `Mailer` are instance services reached through the container. `Class::method()` below names the method, not a static call.
+
+Rev 7 (code review `reviews/code-RR-22.md` applied):
+- **Privacy (M1):** the exporter lists every review with any recovery key (status, note, resolved or invited date), in id order, with a readable status ("No case", "Open", "Resolved") and formatted dates.
+- **Update page (M2, m2, m3, m8):** a failed save keeps what the customer typed (the draft goes back into `MyAccountReviews::edit_form()`); a lost claim race shows the "already used" card; a review that `editable( …, 'invite' )` refuses (spam, trash) shows "can no longer be updated"; with invitations off, outstanding links show "no longer available" so the transparency notice stays true. A failed `update()` releases the token with `TokenRepository::release()` (status active, `used_at` cleared). Failing saves on one link are rate limited (`edit_t{token}`, `MyAccountReviews::RATE_MAX`).
+- **Alerts (M3, m6, m9, m13):** Pro's own alert goes to free's `alert_to()` at `free_api( 13 )`, and Pro decides "handled" from the review's stored rating exactly as its own alert does. The alert no longer suggests opening a case. A review already in spam or trash gets no alert.
+- **Invite claim (M4, m1, m10, m11):** `send_invite()` is private; every early return after the claim except "already invited" releases it. An edit token whose `products` write fails is deleted and never sent. The store sees "Invitation sent." or the reason on All Reviews (transient `ndvr_recovery_notice_{user}`).
+- **Settings (m5, m7):** the support contact accepts an email (`mailto:` dropped), an `http(s)://` address, or short text such as a phone number (shown only as text). The invitation sentences and the legal-advice sentence appear only where invitations are available.
+- **Nits (m13):** the update page's title is "Update your review"; the invalid-link card fits an update link; the Open cases count uses the list's review types and post types. Two SELECTs per landing view (lookup + resolve) are left as they are (cheap, keyed by hash).
+- **POST field (m12):** the update form posts `ndvr_edit_review_save` (`MyAccountReviews::SAVE_FIELD`) with nonce `ndvr_edit_review_{id}`; `ndvr_edit_save` is the admin edit screen's field.
+- **Tests:** rr-22.php 58/58 (adds T1–T12 and a lost-claim race: the claim, the edit box, the lock release, revoked/expired/trashed/disabled links, the draft, the rate limit, alert escaping and address, all three forms' support text, the count, reopen, hooks, sanitizers, an unrated review, a spam review; RR-22P-3 as "no review_created or status change during an invited update"); Pro rr-22p.php 3/3. Mutations on the fixes: 16/17 killed; the survivor (the review-type clause in the Open cases count) is equivalent, because cases can only be set on customer-editable reviews.
 
 Rev 6 (as built):
 - **Service** `recovery` (`Reviews\Recovery`, Registerable). The settings card reads every stored value itself and prints the "on this form" markers for its render-less fields (the bug the RR-21 review found in that feature's card); the harness posts the card through `sanitize_page()`.
@@ -138,7 +148,7 @@ Pro (paired tasks, Pro never edited by free):
   - `ndv-reviews/recovery_resolved` (int, bool `$resolved`);
   - `ndv-reviews/recovery_invited` (int `$comment_id`).
 - **Moderation (F4):** view `open_cases`; row actions `recovery_open`, `recovery_resolve`, `recovery_reopen`, `recovery_invite`, offered on every customer-editable review.
-- **Landing:** the existing `ndvr_k` query var handles type `edit`. POST field `ndvr_edit_save`, nonce `ndvr_edit_review_{comment_id}`. The save calls `update()` with `via => 'invite'`. GET argument `ndvr_edit_saved=1` on the PRG redirect target.
+- **Landing:** the existing `ndvr_k` query var handles type `edit`. POST field `ndvr_edit_review_save`, nonce `ndvr_edit_review_{comment_id}`. The save calls `update()` with `via => 'invite'`. GET argument `ndvr_edit_saved=1` on the PRG redirect target.
 - **Transient** `ndvr_edit_saved_{token_id}` (60 s): set by a successful save just before its redirect, deleted when the thank-you text is shown.
 - **Option** `ndv_reviews_invite_lock_{comment_id}` (written by raw `INSERT IGNORE`, autoload `no`, value `time()`): the invite send claim (§8). Kept after sending.
 - **Uninstall registry (F2):** option prefix `ndv_reviews_invite_lock_` and transient prefix `ndvr_edit_saved_`. If F2 shipped without an option-prefix group, this PRD adds it.

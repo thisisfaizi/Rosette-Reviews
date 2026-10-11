@@ -384,7 +384,9 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   actions `low_rating_received`, `recovery_resolved`, `recovery_invited`. View `open_cases`; row actions `recovery_open`,
   `recovery_resolve`, `recovery_reopen`, `recovery_invite`. Option prefix `ndv_reviews_invite_lock_`, transient prefix
   `ndvr_edit_saved_`. Transparency key `recovery`, fact `edit_invites`. Pro RR-22P-1: `Moderation\Plus::alert_handled()`
-  is true only while Pro's low-rating alert is on and the rating is within its threshold.
+  is true only while Pro's low-rating alert is on and the review's stored rating is within its threshold; Pro's alert goes
+  to free's `alert_to()`. Rev 7: `send_invite()` private; `TokenRepository::release( $id )`; `Recovery::status_label()`;
+  update form POST field `ndvr_edit_review_save`, nonce `ndvr_edit_review_{id}`; transient prefix `ndvr_recovery_notice_`.
 - RR-23 (NDVR_API 14): service `purchase_dates` = `Reviews\PurchaseDates` (`record()`, `lookup()`, `backfill()`); static
   `Display\Ownership::text( $review )`, `label( $days )`, `days_between( $from_gmt, $to_gmt )`, `render()` on
   `review_meta_after` (5). Comment meta `_ndvr_purchased_at` (GMT). View keys `date_gmt`, `purchased_at`. Filters

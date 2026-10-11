@@ -106,6 +106,7 @@ final class NDVR_QA_RR22 {
 			$this->ac17();
 			$this->ac18_ac19();
 			$this->ac20();
+			$this->review_fixes();
 			$this->guards();
 			$this->settings_card();
 		} catch ( \Throwable $e ) {
@@ -119,6 +120,254 @@ final class NDVR_QA_RR22 {
 		return 0 === $this->count['fail'];
 	}
 
+	/**
+	 * Code review RR-22 (M1–M4, m2–m13, T1–T12): the token claim, the edit
+	 * box, the lock release, revoked/expired/trashed/disabled links, the
+	 * alert's escaping and address, the success message on every form, the
+	 * Open cases count, reopen, the hooks, the sanitizers, an unrated review.
+	 *
+	 * @return void
+	 */
+	private function review_fixes() {
+		global $wpdb;
+		$tokens = $this->c()->get( 'token_repository' );
+
+		// T1: consume() is atomic; release() undoes it.
+		$id     = $this->review( array( 'user' => true, 'approved' => 1 ) );
+		$t      = $tokens->create_edit_token( $id, (string) get_comment( $id )->comment_author_email, (int) get_comment( $id )->user_id );
+		$first  = $tokens->consume( $t['id'] );
+		$second = $tokens->consume( $t['id'] );
+		$used   = $this->token( $t['raw'] );
+		$rel    = $tokens->release( $t['id'] );
+		$again  = $tokens->release( $t['id'] );
+		$back   = $this->token( $t['raw'] );
+		$this->ok( $first && ! $second && 'used' === $used->status && $rel && ! $again && 'active' === $back->status && empty( $back->used_at ), 'T1: consume() claims once; release() makes it active again with used_at cleared, once' );
+
+		// T3 + M1: the edit box, its save, and the export after "No case".
+		$fired = array();
+		$spy   = static function ( $cid, $resolved ) use ( &$fired ) {
+			$fired[] = (bool) $resolved;
+		};
+		add_action( 'ndv-reviews/recovery_resolved', $spy, 10, 2 );
+		ob_start();
+		$this->r()->edit_box( get_comment( $id ) );
+		$box    = (string) ob_get_clean();
+		$import = $this->review( array( 'stars' => 1, 'source' => 'import' ) );
+		ob_start();
+		$this->r()->edit_box( get_comment( $import ) );
+		$none  = (string) ob_get_clean();
+		$_POST = array(
+			'ndvr_recovery_status' => 'resolved',
+			'ndvr_recovery_note'   => str_repeat( 'n', 2500 ),
+		);
+		$this->r()->edit_save( $id );
+		$long  = (string) get_comment_meta( $id, Recovery::NOTE_META, true );
+		$_POST = array(
+			'ndvr_recovery_status' => '',
+			'ndvr_recovery_note'   => 'Kept note about the parcel.',
+		);
+		$this->r()->edit_save( $id );
+		wp_set_current_user( 0 );
+		$_POST = array( 'ndvr_recovery_status' => 'open' );
+		$this->r()->edit_save( $id );
+		wp_set_current_user( 1 );
+		$_POST = array();
+		remove_action( 'ndv-reviews/recovery_resolved', $spy, 10 );
+		$this->ok( false !== strpos( $box, 'ndvr_recovery_status' ) && '' === trim( $none ) && 2000 === mb_strlen( $long ) && '' === Recovery::status( $id ) && array( true, false ) === $fired, 'T3: the edit box shows on an editable review only; resolved then "No case" fire recovery_resolved true/false; a 2,500-character note is cut to 2,000; a save without moderate_comments changes nothing' );
+		$export = (string) wp_json_encode( $this->r()->export( (string) get_comment( $id )->comment_author_email, 1 )['data'] );
+		$this->ok( false !== strpos( $export, 'Kept note about the parcel.' ) && false !== strpos( $export, 'No case' ) && false === strpos( $export, '"resolved"' ), 'M1: after "No case" the export still has the note and the resolved date, with readable values' );
+
+		// M4 + m11: a failed token insert releases the claim; the store sees why.
+		$id4 = $this->review( array( 'user' => true, 'approved' => 1 ) );
+		$this->r()->set_status( $id4, 'resolved' );
+		$break = static function ( $q ) {
+			return ( 0 === stripos( ltrim( (string) $q ), 'INSERT' ) && false !== stripos( (string) $q, 'review_tokens' ) ) ? '' : $q;
+		};
+		$n = count( $this->mails );
+		add_filter( 'query', $break );
+		$this->r()->handle_action( 'recovery_invite', array( $id4 ) );
+		remove_filter( 'query', $break );
+		$lock    = (string) $wpdb->get_var( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name = %s", Recovery::LOCK_PREFIX . $id4 ) );
+		$notice1 = get_transient( Recovery::NOTICE_PREFIX . '1' );
+		$this->r()->handle_action( 'recovery_invite', array( $id4 ) );
+		$notice2 = get_transient( Recovery::NOTICE_PREFIX . '1' );
+		ob_start();
+		$_GET = array( 'page' => \NdvReviews\Moderation\Page::PAGE_SLUG );
+		$this->r()->show_notice();
+		$_GET  = array();
+		$shown = (string) ob_get_clean();
+		$this->ok( '' === $lock && count( $this->mails ) === $n + 1 && false !== strpos( (string) ( $notice1['text'] ?? '' ), 'could not be created' ) && empty( $notice1['ok'] ) && ! empty( $notice2['ok'] ) && false !== strpos( $shown, 'Invitation sent.' ) && false === get_transient( Recovery::NOTICE_PREFIX . '1' ), 'M4: a failed link insert releases the claim (the retry sends); the store is told why, then "Invitation sent." once' );
+
+		// T5: a failed send revokes its link.
+		$id5  = $this->review( array( 'user' => true, 'approved' => 1 ) );
+		$this->r()->set_status( $id5, 'resolved' );
+		$fail = static function () {
+			return false;
+		};
+		$n    = count( $this->mails );
+		add_filter( 'pre_wp_mail', $fail, 100 );
+		$this->r()->handle_action( 'recovery_invite', array( $id5 ) );
+		remove_filter( 'pre_wp_mail', $fail, 100 );
+		$dead = $this->raw( array_slice( $this->mails, $n ) );
+		$this->ok( '' !== $dead && 'revoked' === $this->token( $dead )->status && false !== strpos( $this->page( $dead ), 'This link is no longer valid' ), 'T5: the link in a failed send is revoked and shows the invalid card' );
+
+		// T6: an expired link, a trashed review, and invitations turned off.
+		$n = count( $this->mails );
+		$this->r()->handle_action( 'recovery_invite', array( $id5 ) );
+		$live = $this->raw( array_slice( $this->mails, $n ) );
+		$wpdb->update( $wpdb->prefix . NDVR_TABLE_PREFIX . 'review_tokens', array( 'expires_at' => gmdate( 'Y-m-d H:i:s', time() - 60 ) ), array( 'id' => (int) $this->token( $live )->id ) );
+		$expired = $this->page( $live );
+		$id6     = $this->review( array( 'user' => true, 'approved' => 1 ) );
+		$this->r()->set_status( $id6, 'resolved' );
+		$n = count( $this->mails );
+		$this->r()->handle_action( 'recovery_invite', array( $id6 ) );
+		$raw6 = $this->raw( array_slice( $this->mails, $n ) );
+		$this->set( array( 'recovery_invites' => false ) );
+		$off = $this->page( $raw6 );
+		$this->set( array( 'recovery_invites' => true ) );
+		wp_trash_comment( $id6 );
+		$trashed = $this->page( $raw6 );
+		wp_untrash_comment( $id6 );
+		$this->ok( false !== strpos( $expired, 'This link is no longer valid' ) && 'expired' === $this->token( $live )->status && false !== strpos( $off, 'no longer available' ) && false !== strpos( $trashed, 'can no longer be updated' ) && false !== strpos( $this->page( $raw6 ), 'name="review_id"' ), 'T6: an expired link shows the invalid card and is marked expired; with invitations off or the review trashed there is no form; restored, the form is back' );
+
+		// m4: failing saves on one link are rate limited.
+		$plain = $this->review( array( 'user' => true, 'approved' => 1, 'plain' => 3 ) );
+		$this->r()->set_status( $plain, 'resolved' );
+		$n = count( $this->mails );
+		$this->r()->handle_action( 'recovery_invite', array( $plain ) );
+		$raw7 = $this->raw( array_slice( $this->mails, $n ) );
+		$last = array( 'html' => '' );
+		for ( $i = 0; $i <= \NdvReviews\Account\MyAccountReviews::RATE_MAX; $i++ ) {
+			$last = $this->post_edit( $raw7, $plain, 'Trying again with a bad rating.', array( 'ndvr_rating' => '7' ) );
+		}
+		$this->ok( false === stripos( $last['html'], 'star rating' ) && false !== strpos( $last['html'], 'is-error' ) && 'active' === $this->token( $raw7 )->status, 'm4: after ' . \NdvReviews\Account\MyAccountReviews::RATE_MAX . ' failing saves the next is refused by the rate limit, and the link stays usable' );
+
+		// T8: the alert escapes what the customer wrote, links the order, and finds its address.
+		$order = wc_create_order();
+		$order->set_billing_email( 'rr22-o@rosette-qa.dev' );
+		$order->add_product( wc_get_product( $this->fx['p1'] ), 1 );
+		$order->save();
+		$this->fx['orders'][]   = (int) $order->get_id();
+		$_SERVER['REMOTE_ADDR'] = '10.' . $this->net . '.9.9';
+		$n                      = count( $this->mails );
+		$evil                   = $this->c()->get( 'reviews' )->create(
+			array(
+				'product_id' => $this->fx['p1'],
+				'author'     => '<b>Bold</b> Person',
+				'email'      => 'rr22-evil@rosette-qa.dev',
+				'title'      => '<script>t()</script>Title',
+				'content'    => '<script>alert(1)</script> It broke on day one, sadly.',
+				'criteria'   => $this->scores( 1 ),
+				'source'     => 'magic_link',
+				'order_id'   => (int) $order->get_id(),
+				'approved'   => 0,
+			)
+		);
+		$this->fx['comments'][] = (int) $evil;
+		$alerts                 = array_values( array_filter( array_slice( $this->mails, $n ), array( $this, 'is_alert' ) ) );
+		$body                   = $alerts ? (string) $alerts[0]['message'] : '';
+		$this->set( array( 'recovery_alert_email' => '', 'admin_notify_email' => 'notify@rosette-qa.dev' ) );
+		$fallback1 = $this->r()->alert_to();
+		$this->set( array( 'admin_notify_email' => '' ) );
+		$fallback2 = $this->r()->alert_to();
+		$this->set( array( 'recovery_alert_email' => 'alerts@rosette-qa.dev' ) );
+		$this->ok( 1 === count( $alerts ) && false === stripos( $body, '<script' ) && false === strpos( $body, '<b>Bold' ) && false !== strpos( $body, 'Order #' . $order->get_order_number() ) && false === strpos( $body, 'open a case' ) && 'notify@rosette-qa.dev' === $fallback1 && get_option( 'admin_email' ) === $fallback2, 'T8: the alert escapes the title, text and name, links the order, never prompts a case; the address falls back to the notification address, then the admin email' );
+
+		// T9: the support text on the testimonial and landing forms, as on the product form.
+		$support = 'Sorry it wasn\'t right. Contact us at help@rosette-qa.dev and we\'ll help.';
+		$tlow    = $this->submit_testimonial( 2 );
+		$thigh   = $this->submit_testimonial( 4 );
+		$llow    = $this->submit_landing( 2 );
+		$ends    = static function ( $json ) use ( $support ) {
+			$m = (string) ( $json['data']['message'] ?? '' );
+			return substr( $m, -strlen( $support ) ) === $support && false === strpos( $m, '<' );
+		};
+		$this->ok( $ends( $tlow ) && $ends( $llow ) && ! empty( $thigh['success'] ) && false === strpos( (string) $thigh['data']['message'], 'Contact us' ), 'T9: the testimonial and landing replies end with the plain support text after a low rating; 4★ is unchanged' );
+
+		// T10: the count matches the view; reopen; the hooks; the rating filter.
+		$open = $this->review( array( 'stars' => 5 ) );
+		$this->r()->handle_action( 'recovery_open', array( $open ) );
+		$res = $this->review( array( 'user' => true, 'approved' => 1 ) );
+		$this->r()->set_status( $res, 'resolved' );
+		$this->r()->handle_action( 'recovery_reopen', array( $res ) );
+		$invited = array();
+		$ispy    = static function ( $cid ) use ( &$invited ) {
+			$invited[] = (int) $cid;
+		};
+		add_action( 'ndv-reviews/recovery_invited', $ispy );
+		$this->r()->set_status( $res, 'resolved' );
+		$this->r()->handle_action( 'recovery_invite', array( $res ) );
+		remove_action( 'ndv-reviews/recovery_invited', $ispy );
+		$up = static function () {
+			return 5.0;
+		};
+		add_filter( 'ndv-reviews/recovery_rating', $up );
+		$n = count( $this->mails );
+		$this->review( array( 'stars' => 1 ) );
+		$quiet = count( array_filter( array_slice( $this->mails, $n ), array( $this, 'is_alert' ) ) );
+		remove_filter( 'ndv-reviews/recovery_rating', $up );
+		$this->ok( count( $this->open_ids() ) === $this->r()->open_total() && in_array( $open, $this->open_ids(), true ) && array( $res ) === $invited && 0 === $quiet, 'T10: the Open cases count matches its list; reopen reopens; recovery_invited fires once; a filtered rating of 5 sends no alert' );
+
+		// T11: the sanitizers at their edges.
+		$fields = $this->r()->register_fields( array() );
+		$san    = static function ( $key, $raw ) use ( $fields ) {
+			return call_user_func( $fields[ $key ]['sanitize'], $raw );
+		};
+		$this->ok(
+			3 === $san( 'recovery_threshold', '9' ) && 2 === $san( 'recovery_threshold', 'abc' ) && 0 === $san( 'recovery_threshold', '-1' )
+			&& 'Call 555-1234' === $san( 'recovery_support', 'Call 555-1234' ) && 'help@rosette-qa.dev' === $san( 'recovery_support', 'mailto:help@rosette-qa.dev' ) && 'https://example.com/help' === $san( 'recovery_support', 'https://example.com/help' )
+			&& 300 === mb_strlen( $san( 'recovery_message', str_repeat( 'm', 400 ) ) ) && '' === $san( 'recovery_alert_email', 'not an email' ),
+			'T11: threshold 9 → 3, abc → 2, -1 → 0; a phone number stays text, mailto: is dropped, a URL is kept; a 400-character message is cut to 300; a bad alert email is dropped'
+		);
+
+		// T12: a review with no overall rating is never "low".
+		$unrated = $this->review( array( 'stars' => 1 ) );
+		delete_comment_meta( $unrated, '_ndvr_overall_rating' );
+		$this->set( array( 'recovery_threshold' => 3 ) );
+		$n = count( $this->mails );
+		$this->r()->alert( $unrated );
+		$msg = $this->r()->success_message( 'Thanks.', $unrated, array() );
+		$this->set( array( 'recovery_threshold' => 2 ) );
+		$this->ok( count( $this->mails ) === $n && 'Thanks.' === $msg, 'T12: a review with no rating sends no alert and gets no support text' );
+
+		// m3: a concurrent save claims the link first: the used card, nothing stored.
+		$race_id = $this->review( array( 'user' => true, 'approved' => 1 ) );
+		$this->r()->set_status( $race_id, 'resolved' );
+		$n = count( $this->mails );
+		$this->r()->handle_action( 'recovery_invite', array( $race_id ) );
+		$race_raw = $this->raw( array_slice( $this->mails, $n ) );
+		$race_tid = (int) $this->token( $race_raw )->id;
+		$table    = $wpdb->prefix . NDVR_TABLE_PREFIX . 'review_tokens';
+		$done     = false;
+		$race     = static function ( $q ) use ( $wpdb, $table, $race_tid, &$done ) {
+			if ( ! $done && false !== strpos( (string) $q, "SET status = 'used'" ) ) {
+				$done = true;
+				$wpdb->query( $wpdb->prepare( "UPDATE `{$table}` SET status = 'used' WHERE id = %d", $race_tid ) );
+			}
+			return $q;
+		};
+		add_filter( 'query', $race );
+		$lost = $this->post_edit( $race_raw, $race_id, 'Saved at the same moment in another tab.' );
+		remove_filter( 'query', $race );
+		$this->ok( $done && false === $lost['redirect'] && false !== strpos( $lost['html'], 'This link has already been used.' ) && false === strpos( $lost['html'], 'name="review_id"' ) && ! is_array( get_comment_meta( $race_id, '_ndvr_pending_edit', true ) ), 'm3: when another save claims the link first, the page shows "already used" (no form) and stores nothing' );
+
+		// m13: a review already in spam gets no alert.
+		$spam = $this->review( array( 'stars' => 1 ) );
+		wp_spam_comment( $spam );
+		$n = count( $this->mails );
+		$this->r()->alert( $spam );
+		$this->ok( count( $this->mails ) === $n, 'm13: a low review already marked as spam sends no alert' );
+	}
+
+	/**
+	 * Whether a captured mail is a low-rating alert.
+	 *
+	 * @param array $m Mail.
+	 * @return bool
+	 */
+	public function is_alert( $m ) {
+		return false !== strpos( (string) ( $m['subject'] ?? '' ), '-star review of' );
+	}
 	/**
 	 * Guards the ACs don't reach (mutation follow-up): a failed send can be
 	 * retried, ownership is re-checked, nonce and honeypot, capability and
@@ -405,8 +654,11 @@ final class NDVR_QA_RR22 {
 		$id2 = $this->review( array( 'user' => true, 'approved' => 1 ) );
 		$this->r()->set_status( $id2, 'resolved' );
 		$n = count( $this->mails );
-		$this->r()->send_invite( $id2 );
-		$this->r()->send_invite( $id2 );
+		// send_invite() is private (only invite() reaches it, after the claim).
+		$send = new \ReflectionMethod( $this->r(), 'send_invite' );
+		$send->setAccessible( true );
+		$send->invoke( $this->r(), $id2 );
+		$send->invoke( $this->r(), $id2 );
 		$this->ok( 1 === count( $this->mails ) - $n, 'AC6: the send path run twice sends exactly one email' );
 
 		// The lock row already present while notoptions says it is absent.
@@ -459,6 +711,14 @@ final class NDVR_QA_RR22 {
 		$res   = $this->post_edit( $raw, $other, 'Hijack attempt text that is long enough.' );
 		$this->ok( '' === (string) get_comment_meta( $other, '_ndvr_pending_edit', true ) && false === $res['redirect'], 'AC9: a POST with this token and another review\'s id is refused' );
 
+		// RR-22P-3: Pro coupons run on review_created and transition_comment_status;
+		// an invited update and its approval must fire neither.
+		$coupon_hooks = 0;
+		$coupon_spy   = static function () use ( &$coupon_hooks ) {
+			++$coupon_hooks;
+		};
+		add_action( 'ndv-reviews/review_created', $coupon_spy );
+		add_action( 'transition_comment_status', $coupon_spy );
 		$res = $this->post_edit( $raw, $id, 'The updated text after talking to the store.' );
 		$row = $this->token( $raw );
 		$this->ok( false !== $res['redirect'] && false !== strpos( (string) $res['redirect'], 'ndvr_edit_saved=1' ) && is_array( get_comment_meta( $id, '_ndvr_pending_edit', true ) ) && get_comment( $id )->comment_content === $live && 'used' === $row->status, 'AC8: saving stores _ndvr_pending_edit, the live review is unchanged and the token is used' );
@@ -469,7 +729,10 @@ final class NDVR_QA_RR22 {
 		$this->ok( false !== strpos( $thanks, 'Thanks. Your changes will show after the store checks them.' ) && false !== strpos( $later, 'This link has already been used.' ), 'AC8: the redirect target thanks once, then says the link was used' );
 		$pending = get_comment_meta( $id, '_ndvr_pending_edit', true );
 		$this->c()->get( 'reviews' )->apply_pending_edit( $id, $pending['submitted_at'] );
+		remove_action( 'ndv-reviews/review_created', $coupon_spy );
+		remove_action( 'transition_comment_status', $coupon_spy );
 		$this->ok( false !== strpos( get_comment( $id )->comment_content, 'The updated text' ) && '' !== (string) get_comment_meta( $id, '_ndvr_edited_at', true ), 'AC8: after the moderator applies it, the review is updated and marked edited' );
+		$this->ok( 0 === $coupon_hooks, 'RR-22P-3: the invited update and its approval fire neither review_created nor a status change (what Pro coupons run on)' );
 
 		// AC9: an edit token can't write a new review on the landing form
 		// (a fresh, unused one: the one above is used and would get 410).
@@ -556,7 +819,7 @@ final class NDVR_QA_RR22 {
 		$exporters = apply_filters( 'wp_privacy_personal_data_exporters', array() );
 		$out       = call_user_func( $exporters['ndv-reviews-recovery']['callback'], $email, 1 );
 		$text      = (string) wp_json_encode( $out['data'] );
-		$this->ok( false !== strpos( $text, 'cracked lid' ) && false !== strpos( $text, 'resolved' ), 'AC14: the export includes the case status, dates and the store\'s note' );
+		$this->ok( false !== strpos( $text, 'cracked lid' ) && false !== strpos( $text, '"Resolved"' ) && false !== strpos( $text, 'Invited to update' ), 'AC14: the export includes the case status (as a label), dates and the store\'s note' );
 		$hash   = hash_hmac( 'sha256', strtolower( trim( $email ) ), wp_salt( 'auth' ) );
 		$erasers = apply_filters( 'wp_privacy_personal_data_erasers', array() );
 		for ( $page = 1; $page < 20; $page++ ) {
@@ -654,7 +917,7 @@ final class NDVR_QA_RR22 {
 		$good = $this->post_edit( $raw, $plain, 'A plain-rating review, updated.', array( 'ndvr_rating' => '4' ) );
 		$pend = get_comment_meta( $plain, '_ndvr_pending_edit', true );
 		$this->ok( false !== strpos( $page, 'The pending text, waiting.' ), 'AC19: the update page is prefilled with the pending revision' );
-		$this->ok( false === $bad['redirect'] && false !== stripos( $bad['html'], 'star rating' ) && 'active' === $row->status, 'AC19: rating 7 shows the star-rating error and gives the link back' );
+		$this->ok( false === $bad['redirect'] && false !== stripos( $bad['html'], 'star rating' ) && 'active' === $row->status && false !== strpos( $bad['html'], 'A plain-rating review, updated.' ), 'AC19: rating 7 shows the star-rating error, gives the link back and keeps what was typed' );
 		$this->ok( false !== $good['redirect'] && is_array( $pend ) && 4 === (int) ( $pend['rating'] ?? 0 ), 'AC19: rating 4 is stored in the pending edit' );
 	}
 

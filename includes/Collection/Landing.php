@@ -159,7 +159,7 @@ class Landing implements Registerable {
 		// (active, used, expired) before resolve(), which hides used ones.
 		$any = $this->tokens->lookup( $raw );
 		if ( $any && 'edit' === $any->type ) {
-			$this->output_page( \NdvReviews\Plugin::instance()->container()->get( 'recovery' )->edit_page( $any, $raw ) );
+			$this->output_page( \NdvReviews\Plugin::instance()->container()->get( 'recovery' )->edit_page( $any, $raw ), __( 'Update your review', 'rosette-reviews' ) );
 			exit;
 		}
 
@@ -598,9 +598,10 @@ class Landing implements Registerable {
 	 * Output a minimal standalone HTML page wrapping the landing content.
 	 *
 	 * @param string $inner Rendered landing markup.
+	 * @param string $title Page title (default "Write a review").
 	 * @return void
 	 */
-	private function output_page( $inner ) {
+	private function output_page( $inner, $title = '' ) {
 		header( 'Content-Type: text/html; charset=utf-8' );
 		?>
 <!DOCTYPE html>
@@ -609,7 +610,7 @@ class Landing implements Registerable {
 	<meta charset="<?php bloginfo( 'charset' ); ?>" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<meta name="robots" content="noindex,nofollow" />
-	<title><?php esc_html_e( 'Write a review', 'rosette-reviews' ); ?> — <?php bloginfo( 'name' ); ?></title>
+	<title><?php echo esc_html( '' !== $title ? $title : __( 'Write a review', 'rosette-reviews' ) ); ?> — <?php bloginfo( 'name' ); ?></title>
 		<?php
 		// This standalone page never calls wp_head()/wp_enqueue_scripts, so the
 		// shared tokens handle (normally registered by Support\Assets on that
