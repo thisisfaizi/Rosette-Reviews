@@ -1,8 +1,18 @@
 # RR-25: GTIN, MPN and brand in product structured data (only what WooCommerce leaves out)
 
-Status: prd-ok (rev 3) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **14** (RR-00 F3b; planned build order, final at merge)
+Status: built (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **16** (rev 4) (RR-00 F3b; planned build order, final at merge)
 
 Round 2: passed; rev 3 only adds the `NDVR_API` level for the Pro-facing method.
+
+Rev 4 (reconciled with the code after RR-11 to RR-24, before building):
+- **API level:** RR-20 to RR-24 took 11 to 15, so this feature raises `NDVR_API` to **16** (every "14" in §5/§6 means 16).
+- **Line numbers:** `enrich_woo_product()` JsonLd.php:109-128 (hook :73), `maybe_output()` :199-260 (hook :76), `mode()` :96-100, `woo_structured_data_active()` :268, `seo_plugin_active()` :291. The SEO & Advanced card is SettingsPage.php:314-332.
+- **Settings (F6):** the three fields register through `ndv-reviews/settings_fields` on a new card slug `seo`, printed with `SettingsFields::render_card_fields( 'settings', 'seo', … )` inside the existing SEO & Advanced card under the schema select, so the save and the "on this form" markers come from F6 (no change to `SettingsPage::handle_save()`'s fixed keys).
+- **Brand sources listed:** WooCommerce Brands (automatic), each `pa_*` attribute taxonomy (`wc_get_attribute_taxonomies()`), and other public product taxonomies except WooCommerce's internal ones (`product_type`, `product_visibility`, `product_shipping_class`) and `product_brand` (that is the automatic source). A stored slug that no longer exists falls back to `auto`.
+- **Standalone path:** identifiers are merged only into the node `maybe_output()` already prints (it prints one only when the product has rated reviews); this feature adds no new standalone output.
+- **Tests on the QA site** (no Playground): `is_product()` is simulated by a real single-product main query; WooCommerce's footer output is captured with `ob_start()`.
+- **As built:** `JsonLd::add_identifiers()` (priority 30), `identifiers_for()`, static `valid_gtin()`, `brand_sources()`, `sanitize_brand_source()`; the three fields render on the SEO & Advanced card through F6. AC7 runs the standalone path on a product with no native GTIN (WooCommerce 11.2 always has `get_global_unique_id()`, so the pre-9.2 case is covered by the `method_exists()` guard in code, not by a stub object). A brand taken from a variation's parent; a different product's node on the same page (a related product) gets nothing. RR-25P-1 (Pro feed identifiers) stays optional and is not built.
+- **Tests:** rr-25.php 13/13 (AC1–AC10, the related-product case and the settings round trip); mutations 11/11 killed.
 
 ## 1. Problem and who it's for
 Google matches product reviews to products using identifiers (GTIN, MPN, brand), and Shopping review feeds need them. CusRev (free) adds them to WooCommerce's Product node. Recent WooCommerce already outputs some of them, so this PRD adds **only what WooCommerce doesn't**. It's for stores that keep identifiers in custom fields or attributes, use older WooCommerce, or have WooCommerce's structured data turned off.

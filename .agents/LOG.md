@@ -992,3 +992,8 @@ EVIDENCE: rr-23 22/22; Pro rr-23p 2/2; fix mutations 5/5 killed. HPOS on/off and
   All Reviews gained `star=low` (1–3 ★). Pro RR-24P-1: AdminReply returns `_ndvr_admin_reply` for the reply rate.
 EVIDENCE: rr-24 16/16; mutations 20/21 killed (1 no-op); AC8 benchmark 267–354 ms for 1,000 products / 20,000 reviews
   on the SQLite QA site (target 300 ms, background job, not a gate).
+
+## 2026-10-11 — RR-25 schema identifiers built → in_review
+- PRD rev 4 reconciled (NDVR_API 16; line numbers; settings through F6 on a new `seo` card inside SEO & Advanced; brand
+  sources listed; QA-site tests instead of Playground).
+EVIDENCE: rr-25 13/13; mutations 11/11 killed. RR-25P-1 (Pro feed identifiers) optional, not built.

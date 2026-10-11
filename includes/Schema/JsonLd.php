@@ -71,6 +71,9 @@ class JsonLd implements Registerable {
 	 */
 	public function register() {
 		add_filter( 'woocommerce_structured_data_product', array( $this, 'enrich_woo_product' ), 20, 2 );
+		// RR-25: after WooCommerce Brands (20) and the ratings (20).
+		add_filter( 'woocommerce_structured_data_product', array( $this, 'add_identifiers' ), 30, 2 );
+		add_filter( 'ndv-reviews/settings_fields', array( $this, 'register_fields' ) );
 		// Woo prints its structured data on wp_footer (10); by 20 we know
 		// whether it produced a Product node for this page.
 		add_action( 'wp_footer', array( $this, 'maybe_output' ), 20 );
@@ -237,6 +240,7 @@ class JsonLd implements Registerable {
 			),
 			$nodes
 		);
+		$data = $data + $this->identifiers_for( $product, $data, 'standalone' );
 
 		/**
 		 * Filter the review JSON-LD before output. Also applied to WooCommerce's
@@ -258,6 +262,260 @@ class JsonLd implements Registerable {
 				JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
 			) .
 			"</script>\n";
+	}
+
+	// ── Product identifiers (RR-25) ──────────────────────────────────────
+
+	/**
+	 * The three settings on the SEO & Advanced card.
+	 *
+	 * @param array<string,array<string,mixed>> $fields Fields.
+	 * @return array<string,array<string,mixed>>
+	 */
+	public function register_fields( $fields ) {
+		$fields = (array) $fields;
+		// Meta keys: letters, digits, underscore and hyphen only (a leading underscore is allowed).
+		$metakey = static function ( $raw ) {
+			return substr( (string) preg_replace( '/[^A-Za-z0-9_\-]/', '', (string) $raw ), 0, 191 );
+		};
+
+		$fields['schema_gtin_meta']    = array(
+			'sanitize' => $metakey,
+			'default'  => '',
+			'page'     => 'settings',
+			'card'     => 'seo',
+			'render'   => array( $this, 'render_gtin_field' ),
+		);
+		$fields['schema_mpn_meta']     = array(
+			'sanitize' => $metakey,
+			'default'  => '',
+			'page'     => 'settings',
+			'card'     => 'seo',
+			'render'   => array( $this, 'render_mpn_field' ),
+		);
+		$fields['schema_brand_source'] = array(
+			'sanitize' => array( __CLASS__, 'sanitize_brand_source' ),
+			'default'  => 'auto',
+			'page'     => 'settings',
+			'card'     => 'seo',
+			'render'   => array( $this, 'render_brand_field' ),
+		);
+
+		return $fields;
+	}
+
+	/**
+	 * `auto` or a product taxonomy offered in the list.
+	 *
+	 * @param mixed $raw Posted value.
+	 * @return string
+	 */
+	public static function sanitize_brand_source( $raw ) {
+		$raw = sanitize_key( (string) $raw );
+
+		return array_key_exists( $raw, self::brand_sources() ) ? $raw : 'auto';
+	}
+
+	/**
+	 * Brand sources: WooCommerce Brands, attributes, other public product taxonomies.
+	 *
+	 * @return array<string,string> Slug => label.
+	 */
+	public static function brand_sources() {
+		$out = array( 'auto' => __( 'WooCommerce Brands (automatic)', 'rosette-reviews' ) );
+		if ( function_exists( 'wc_get_attribute_taxonomies' ) ) {
+			foreach ( (array) wc_get_attribute_taxonomies() as $attr ) {
+				$slug = 'pa_' . $attr->attribute_name;
+				if ( taxonomy_exists( $slug ) ) {
+					/* translators: 1: attribute label, 2: taxonomy slug. */
+					$out[ $slug ] = sprintf( __( 'Attribute: %1$s (%2$s)', 'rosette-reviews' ), $attr->attribute_label, $slug );
+				}
+			}
+		}
+		$skip = array( 'product_type', 'product_visibility', 'product_shipping_class', 'product_brand' );
+		foreach ( get_object_taxonomies( 'product', 'objects' ) as $tax ) {
+			if ( ! $tax->public || isset( $out[ $tax->name ] ) || in_array( $tax->name, $skip, true ) || 0 === strpos( $tax->name, 'pa_' ) ) {
+				continue;
+			}
+			/* translators: 1: taxonomy label, 2: taxonomy slug. */
+			$out[ $tax->name ] = sprintf( __( 'Taxonomy: %1$s (%2$s)', 'rosette-reviews' ), $tax->labels->singular_name, $tax->name );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * GTIN meta key field.
+	 *
+	 * @param mixed $value Stored value.
+	 * @return void
+	 */
+	public function render_gtin_field( $value ) {
+		?>
+		<div class="ndvr-field" style="margin-top:14px;">
+			<p class="description"><?php esc_html_e( 'Product identifiers are added only when WooCommerce or your SEO plugin hasn\'t already set them. Nothing is overwritten.', 'rosette-reviews' ); ?></p>
+			<label for="ndvr-schema-gtin-meta"><?php esc_html_e( 'GTIN from a custom field', 'rosette-reviews' ); ?></label>
+			<input type="text" id="ndvr-schema-gtin-meta" name="schema_gtin_meta" class="regular-text" list="ndvr-gtin-keys" value="<?php echo esc_attr( (string) $value ); ?>" aria-describedby="ndvr-schema-gtin-help" />
+			<datalist id="ndvr-gtin-keys">
+				<?php foreach ( array( '_gtin', '_wpm_gtin_code', 'hwp_product_gtin', '_alg_ean', '_ts_gtin' ) as $key ) : ?>
+					<option value="<?php echo esc_attr( $key ); ?>"></option>
+				<?php endforeach; ?>
+			</datalist>
+			<p class="description" id="ndvr-schema-gtin-help"><?php esc_html_e( 'Only if your GTINs are stored by another plugin. WooCommerce\'s own GTIN field is used automatically. Leave empty to turn this off.', 'rosette-reviews' ); ?></p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * MPN meta key field.
+	 *
+	 * @param mixed $value Stored value.
+	 * @return void
+	 */
+	public function render_mpn_field( $value ) {
+		?>
+		<div class="ndvr-field">
+			<label for="ndvr-schema-mpn-meta"><?php esc_html_e( 'MPN from a custom field', 'rosette-reviews' ); ?></label>
+			<input type="text" id="ndvr-schema-mpn-meta" name="schema_mpn_meta" class="regular-text" value="<?php echo esc_attr( (string) $value ); ?>" aria-describedby="ndvr-schema-mpn-help" />
+			<p class="description" id="ndvr-schema-mpn-help"><?php esc_html_e( 'The product meta key that holds the manufacturer part number. Leave empty to turn this off.', 'rosette-reviews' ); ?></p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Brand source field.
+	 *
+	 * @param mixed $value Stored value.
+	 * @return void
+	 */
+	public function render_brand_field( $value ) {
+		$value = self::sanitize_brand_source( $value );
+		?>
+		<div class="ndvr-field">
+			<label for="ndvr-schema-brand-source"><?php esc_html_e( 'Brand from', 'rosette-reviews' ); ?></label>
+			<select id="ndvr-schema-brand-source" name="schema_brand_source" style="max-width:340px;">
+				<?php foreach ( self::brand_sources() as $slug => $label ) : ?>
+					<option value="<?php echo esc_attr( $slug ); ?>" <?php selected( $value, $slug ); ?>><?php echo esc_html( $label ); ?></option>
+				<?php endforeach; ?>
+			</select>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Add GTIN, MPN and brand to WooCommerce's Product node when they are
+	 * missing (priority 30: after WooCommerce Brands and our ratings, 20).
+	 *
+	 * @param array<string,mixed> $markup  Woo product markup.
+	 * @param \WC_Product         $product Product.
+	 * @return array<string,mixed>
+	 */
+	public function add_identifiers( $markup, $product ) {
+		if ( 'off' === $this->mode() || ! $this->is_single_product_context() || ! $product instanceof \WC_Product || ! is_array( $markup ) ) {
+			return $markup;
+		}
+		if ( \NdvReviews\Reviews\Pool::resolve_id( (int) $product->get_id() ) !== \NdvReviews\Reviews\Pool::resolve_id( get_queried_object_id() ) ) {
+			return $markup;
+		}
+
+		return $markup + $this->identifiers_for( $product, $markup, 'woo' );
+	}
+
+	/**
+	 * The identifiers to add to a Product node: only keys it doesn't have.
+	 *
+	 * @param \WC_Product         $product Product.
+	 * @param array<string,mixed> $markup  The node so far.
+	 * @param string              $context woo|standalone.
+	 * @return array<string,mixed>
+	 */
+	public function identifiers_for( $product, array $markup, $context ) {
+		$add = array();
+		if ( ! $product instanceof \WC_Product ) {
+			return $add;
+		}
+		$standalone = 'standalone' === $context;
+		// WooCommerce described one variation: it chose (or removed) its identifiers on purpose.
+		$variation = ! $standalone && array_key_exists( 'inProductGroupWithID', $markup );
+		$id        = (int) $product->get_id();
+
+		if ( ! $variation && ! array_key_exists( 'gtin', $markup ) ) {
+			$candidates = array();
+			if ( $standalone && method_exists( $product, 'get_global_unique_id' ) ) {
+				$candidates[] = (string) $product->get_global_unique_id();
+			}
+			$gtin_key = (string) $this->settings->get( 'schema_gtin_meta', '' );
+			if ( '' !== $gtin_key ) {
+				$candidates[] = (string) get_post_meta( $id, $gtin_key, true );
+			}
+			foreach ( $candidates as $raw ) {
+				$digits = (string) preg_replace( '/\D/', '', $raw );
+				if ( self::valid_gtin( $digits ) ) {
+					$add['gtin'] = $digits;
+					break;
+				}
+			}
+		}
+
+		$mpn_key = (string) $this->settings->get( 'schema_mpn_meta', '' );
+		if ( ! $variation && '' !== $mpn_key && ! array_key_exists( 'mpn', $markup ) ) {
+			$mpn = mb_substr( trim( wp_strip_all_tags( (string) get_post_meta( $id, $mpn_key, true ) ) ), 0, 70 );
+			if ( '' !== $mpn ) {
+				$add['mpn'] = $mpn;
+			}
+		}
+
+		if ( ! array_key_exists( 'brand', $markup ) ) {
+			$source = self::sanitize_brand_source( $this->settings->get( 'schema_brand_source', 'auto' ) );
+			// On WooCommerce's node, WooCommerce Brands adds its own brand (priority 20).
+			$taxonomy = 'auto' === $source ? ( $standalone && taxonomy_exists( 'product_brand' ) ? 'product_brand' : '' ) : $source;
+			if ( '' !== $taxonomy && function_exists( 'wc_get_product_terms' ) ) {
+				$parent = $product->get_parent_id() ? (int) $product->get_parent_id() : $id;
+				$names  = (array) wc_get_product_terms( $parent, $taxonomy, array( 'fields' => 'names' ) );
+				$name   = $names ? trim( wp_strip_all_tags( (string) reset( $names ) ) ) : '';
+				if ( '' !== $name ) {
+					$add['brand'] = array(
+						'@type' => 'Brand',
+						'name'  => $name,
+					);
+				}
+			}
+		}
+
+		/**
+		 * Filter the identifiers about to be added to a Product node (RR-25).
+		 * Keys already in the node are never overwritten, whatever this returns.
+		 *
+		 * @param array<string,mixed> $add     gtin, mpn, brand.
+		 * @param \WC_Product         $product Product.
+		 * @param array<string,mixed> $markup  The node so far.
+		 * @param string              $context woo|standalone.
+		 */
+		$add = (array) apply_filters( 'ndv-reviews/schema_identifiers', $add, $product, $markup, $context );
+
+		return array_diff_key( $add, $markup );
+	}
+
+	/**
+	 * A GTIN-8, -12, -13 or -14 with a valid GS1 check digit.
+	 *
+	 * @param string $digits Digits only.
+	 * @return bool
+	 */
+	public static function valid_gtin( $digits ) {
+		$digits = (string) $digits;
+		if ( ! preg_match( '/^(\d{8}|\d{12,14})$/', $digits ) ) {
+			return false;
+		}
+		$sum  = 0;
+		$body = substr( $digits, 0, -1 );
+		$len  = strlen( $body );
+		// From the right, the digit next to the check digit weighs 3, the next 1, and so on.
+		for ( $i = 0; $i < $len; $i++ ) {
+			$sum += (int) $body[ $len - 1 - $i ] * ( 0 === $i % 2 ? 3 : 1 );
+		}
+
+		return ( 10 - $sum % 10 ) % 10 === (int) substr( $digits, -1 );
 	}
 
 	/**

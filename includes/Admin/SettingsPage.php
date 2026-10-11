@@ -322,6 +322,7 @@ class SettingsPage implements Registerable {
 							<option value="off"    <?php selected( $s->get( 'schema_mode' ), 'off' ); ?>><?php esc_html_e( 'Off: add no review schema', 'rosette-reviews' ); ?></option>
 						</select>
 					</div>
+					<?php SettingsFields::render_card_fields( 'settings', 'seo', $s->all() ); // RR-25: product identifiers. ?>
 					<div class="ndvr-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--ndvr-line);">
 						<label style="display:flex;align-items:center;gap:8px;font-weight:400;color:var(--ndvr-slate);">
 							<input type="checkbox" name="remove_data_on_uninstall" value="1" <?php checked( (bool) $s->get( 'remove_data_on_uninstall' ) ); ?> />

@@ -100,6 +100,8 @@ Free:
   backfill; setting to hide it).
 - Review health card on the Overview: coverage (with a "products without reviews" list), going stale (sold in 90 days, no
   review in 12 months), replies to low reviews, recent vs all-time rating; computed in the background.
+- GTIN (check-digit validated), MPN and brand in product structured data from fields you choose, only when
+  WooCommerce or an SEO plugin left them out.
 - Review search in the reviews tab (products with 10+ reviews): text and titles only, highlighted, announced, with filters,
   works without JS.
 

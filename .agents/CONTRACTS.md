@@ -403,3 +403,7 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   `health_stale_days` (365), `health_recent_days` (90), `health_response_meta` (''), `health_measures`, `health_catalog_args`.
   Product list vars `ndvr_unreviewed=1`, `ndvr_stale=1`. All Reviews `star=low` (1–3). Pro RR-24P-1: `AdminReply` returns
   `_ndvr_admin_reply` from `health_response_meta`.
+- RR-25 (NDVR_API 16): `Schema\JsonLd::identifiers_for( $product, $markup, $context )` (woo|standalone; only absent keys),
+  static `valid_gtin( $digits )` (8/12/13/14 + GS1 check digit), `brand_sources()`, `sanitize_brand_source()`;
+  `add_identifiers()` on `woocommerce_structured_data_product` at 30. Filter `schema_identifiers( $add, $product, $markup,
+  $context )`. Settings (card `seo`): `schema_gtin_meta` (''), `schema_mpn_meta` (''), `schema_brand_source` ('auto').
