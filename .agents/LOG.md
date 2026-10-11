@@ -1010,3 +1010,9 @@ EVIDENCE: rr-24 22/22; fix mutations 9/9 killed (refund case needs a partial ref
   on both paths (M2); entities, gtin8–14, array meta, all-zero GTIN, filter reach, cached terms, aria (m1–m5, m7, m9, m10).
   m6/m8 kept as documented. PRD rev 5.
 EVIDENCE: rr-25 18/18; fix mutations 8/9 killed (1 equivalent).
+
+## 2026-10-11 — Free prerequisites for RR-19 (shared reviews)
+- RR-24: "Going stale" names the sold listing when its pool's newest review is old (RR-19 AC17); the all-time rating
+  counts each pool once (mirrored member figures). Coverage settled by RR-19's mirror (RR-24 m3).
+- RR-22: the low-rating alert and the invitation name the listing a review was written for (`_ndvr_pooled_from`).
+EVIDENCE: rr-24 23/23, rr-22 59/59 (pool cases through the generic `review_pool_id` filter); mutations 3/3 killed.

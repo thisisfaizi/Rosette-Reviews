@@ -351,6 +351,29 @@ final class NDVR_QA_RR22 {
 		remove_filter( 'query', $race );
 		$this->ok( $done && false === $lost['redirect'] && false !== strpos( $lost['html'], 'This link has already been used.' ) && false === strpos( $lost['html'], 'name="review_id"' ) && ! is_array( get_comment_meta( $race_id, '_ndvr_pending_edit', true ) ), 'm3: when another save claims the link first, the page shows "already used" (no form) and stores nothing' );
 
+		// A review shared into another product's pool names the listing it was written for.
+		$p1   = $this->fx['p1'];
+		$p2   = $this->fx['p2'];
+		$pool = static function ( $pool_id, $post_id ) use ( $p1, $p2 ) {
+			return (int) $post_id === $p2 ? $p1 : $pool_id;
+		};
+		add_filter( 'ndv-reviews/review_pool_id', $pool, 10, 2 );
+		$n      = count( $this->mails );
+		$shared = $this->c()->get( 'reviews' )->create(
+			array(
+				'product_id' => $p2,
+				'author'     => 'Pooled',
+				'email'      => 'rr22-pool@rosette-qa.dev',
+				'content'    => 'A low review written for the toaster listing.',
+				'criteria'   => $this->scores( 1 ),
+				'source'     => 'onsite',
+				'approved'   => 0,
+			)
+		);
+		remove_filter( 'ndv-reviews/review_pool_id', $pool, 10 );
+		$this->fx['comments'][] = (int) $shared;
+		$alerts                 = array_values( array_filter( array_slice( $this->mails, $n ), array( $this, 'is_alert' ) ) );
+		$this->ok( $p1 === (int) get_comment( $shared )->comment_post_ID && 1 === count( $alerts ) && false !== strpos( (string) $alerts[0]['subject'], 'RR22 Toaster' ), 'Pools: a review stored on another product\'s pool is alerted under the listing it was written for' );
 		// m13: a review already in spam gets no alert.
 		$spam = $this->review( array( 'stars' => 1 ) );
 		wp_spam_comment( $spam );

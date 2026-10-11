@@ -86,6 +86,7 @@ final class NDVR_QA_RR24 {
 			$this->ac6();
 			$this->ac7();
 			$this->review_fixes();
+			$this->pooled();
 			$this->ac9();
 			$this->ac8();
 		} catch ( \Throwable $e ) {
@@ -688,6 +689,31 @@ final class NDVR_QA_RR24 {
 		unset( $prev );
 	}
 
+	/**
+	 * Shared reviews (a listing pooled into another, as Pro product groups do):
+	 * the listing that sold is "going stale" by its pool's newest review, and
+	 * mirrored figures count once in the all-time rating.
+	 *
+	 * @return void
+	 */
+	private function pooled() {
+		$main   = $this->product( 'RR24 Pool main' );
+		$member = $this->product( 'RR24 Pool member' );
+		$this->review( $main, 5, 400 );
+		$this->aggregate( $main, 5, 1 );
+		$this->order( array( $member ), time() - 10 * DAY_IN_SECONDS );
+		$pool = static function ( $pool_id, $post_id ) use ( $main, $member ) {
+			return (int) $post_id === $member ? $main : $pool_id;
+		};
+		add_filter( 'ndv-reviews/review_pool_id', $pool, 10, 2 );
+		$without = $this->row( $this->h()->compute(), 'trend' );
+		$this->aggregate( $member, 5, 1 );
+		$data = $this->h()->compute();
+		remove_filter( 'ndv-reviews/review_pool_id', $pool, 10 );
+		$with = $this->row( $data, 'trend' );
+		$this->ok( in_array( $member, $data['stale_ids'], true ) && ! in_array( $main, $data['stale_ids'], true ) && ( $without['overall'] ?? null ) === ( $with['overall'] ?? null ), 'Pools: a listing sharing another\'s reviews is named as going stale when it sold and the shared reviews are old; its mirrored figures don\'t count twice in the all-time rating' );
+		$this->aggregate( $member, 0, 0 );
+	}
 	/**
 	 * Let mark_stale() run again (it works once per request).
 	 *

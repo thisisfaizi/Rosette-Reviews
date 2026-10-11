@@ -328,20 +328,35 @@ class Health implements Registerable {
 	 */
 	private function stale_ids( array $sales, array $catalog ) {
 		global $wpdb;
-		$sales = array_map( 'intval', $sales );
-		foreach ( array_chunk( $sales, self::CHUNK ) as $chunk ) {
+		// The listings that sold (catalog products), grouped by the pool that
+		// holds their reviews: a listing sharing another's reviews is "going
+		// stale" when that pool's newest review is old, and it is the listing
+		// that sold that gets named.
+		$in_catalog = array_flip( $catalog );
+		$sold       = array();
+		foreach ( array_map( 'intval', $sales ) as $id ) {
+			if ( isset( $in_catalog[ $id ] ) ) {
+				$sold[] = $id;
+			}
+		}
+		foreach ( array_chunk( $sold, self::CHUNK ) as $chunk ) {
 			_prime_post_caches( $chunk, false, false );
 		}
-		$pools  = array_values( array_unique( array_map( array( Pool::class, 'resolve_id' ), $sales ) ) );
-		$pools  = array_values( array_intersect( $pools, $catalog ) );
+		$by_pool = array();
+		foreach ( $sold as $id ) {
+			$by_pool[ Pool::resolve_id( $id ) ][] = $id;
+		}
 		$cutoff = gmdate( 'Y-m-d H:i:s', time() - self::stale_days() * DAY_IN_SECONDS );
 		$stale  = array();
-		foreach ( array_chunk( $pools, self::CHUNK ) as $chunk ) {
+		foreach ( array_chunk( array_keys( $by_pool ), self::CHUNK ) as $chunk ) {
 			$in = implode( ',', array_map( 'intval', $chunk ) );
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in is integers.
-			$rows  = (array) $wpdb->get_col( $wpdb->prepare( "SELECT comment_post_ID FROM {$wpdb->comments} WHERE comment_approved = '1' AND comment_parent = 0 AND comment_type IN ('review','comment') AND comment_post_ID IN ({$in}) GROUP BY comment_post_ID HAVING MAX(comment_date_gmt) < %s", $cutoff ) );
-			$stale = array_merge( $stale, array_map( 'intval', $rows ) );
+			$rows = (array) $wpdb->get_col( $wpdb->prepare( "SELECT comment_post_ID FROM {$wpdb->comments} WHERE comment_approved = '1' AND comment_parent = 0 AND comment_type IN ('review','comment') AND comment_post_ID IN ({$in}) GROUP BY comment_post_ID HAVING MAX(comment_date_gmt) < %s", $cutoff ) );
+			foreach ( $rows as $pool ) {
+				$stale = array_merge( $stale, $by_pool[ (int) $pool ] ?? array() );
+			}
 		}
+		$stale = array_values( array_unique( $stale ) );
 		sort( $stale );
 
 		return $stale;
@@ -488,14 +503,24 @@ class Health implements Registerable {
 		}
 		$recent = (object) array( 'avg_rating' => $r_sum / $r_n );
 		// All time from the stored product aggregates: no review scan.
+		// Products sharing one pool carry the same figures: each pool counts once.
 		$sum   = 0.0;
 		$count = 0;
+		$seen  = array();
 		foreach ( array_chunk( $catalog, self::CHUNK ) as $chunk ) {
 			$in = implode( ',', array_map( 'intval', $chunk ) );
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in is integers.
-			$row    = $wpdb->get_row( "SELECT SUM(CAST(a.meta_value AS DECIMAL(10,4)) * CAST(n.meta_value AS UNSIGNED)) AS total, SUM(CAST(n.meta_value AS UNSIGNED)) AS n FROM {$wpdb->postmeta} a INNER JOIN {$wpdb->postmeta} n ON n.post_id = a.post_id AND n.meta_key = '_wc_review_count' WHERE a.meta_key = '_wc_average_rating' AND CAST(n.meta_value AS UNSIGNED) > 0 AND a.post_id IN ({$in})" );
-			$sum   += $row ? (float) $row->total : 0.0;
-			$count += $row ? (int) $row->n : 0;
+			$rows = (array) $wpdb->get_results( "SELECT a.post_id, CAST(a.meta_value AS DECIMAL(10,4)) AS avg_rating, CAST(n.meta_value AS UNSIGNED) AS n FROM {$wpdb->postmeta} a INNER JOIN {$wpdb->postmeta} n ON n.post_id = a.post_id AND n.meta_key = '_wc_review_count' WHERE a.meta_key = '_wc_average_rating' AND CAST(n.meta_value AS UNSIGNED) > 0 AND a.post_id IN ({$in})" );
+			_prime_post_caches( array_map( 'intval', wp_list_pluck( $rows, 'post_id' ) ), false, false );
+			foreach ( $rows as $r ) {
+				$pool = Pool::resolve_id( (int) $r->post_id );
+				if ( isset( $seen[ $pool ] ) ) {
+					continue;
+				}
+				$seen[ $pool ] = true;
+				$sum          += (float) $r->avg_rating * (int) $r->n;
+				$count        += (int) $r->n;
+			}
 		}
 		$recent_avg = round( (float) $recent->avg_rating, 1 );
 		$overall    = $count ? round( $sum / $count, 2 ) : $recent_avg;

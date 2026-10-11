@@ -356,7 +356,7 @@ class Recovery implements Registerable {
 			return;
 		}
 
-		$product = get_the_title( (int) $comment->comment_post_ID );
+		$product = get_the_title( self::listing( $comment ) );
 		$store   = wp_specialchars_decode( (string) get_bloginfo( 'name' ), ENT_QUOTES );
 		$stars   = (int) round( $rating );
 		$html    = '<p><strong>' . esc_html(
@@ -572,7 +572,7 @@ class Recovery implements Registerable {
 		}
 		update_comment_meta( $comment_id, self::INVITED_META, current_time( 'mysql', true ) );
 
-		$product = wp_specialchars_decode( get_the_title( (int) $comment->comment_post_ID ), ENT_QUOTES );
+		$product = wp_specialchars_decode( get_the_title( self::listing( $comment ) ), ENT_QUOTES );
 		$date    = wp_date( (string) get_option( 'date_format' ), (int) strtotime( $comment->comment_date_gmt . ' UTC' ) );
 		$html    = '<p>' . esc_html(
 			sprintf(
@@ -1151,6 +1151,19 @@ class Recovery implements Registerable {
 			'data' => $items,
 			'done' => count( $comments ) < $number,
 		);
+	}
+
+	/**
+	 * The listing a review was written for: where it was pooled from, else
+	 * the post it is stored on.
+	 *
+	 * @param \WP_Comment $comment Review.
+	 * @return int
+	 */
+	private static function listing( $comment ) {
+		$from = (int) get_comment_meta( (int) $comment->comment_ID, Pool::POOLED_FROM_META, true );
+
+		return $from > 0 ? $from : (int) $comment->comment_post_ID;
 	}
 
 	/**

@@ -10,7 +10,7 @@ Rev 5 (code review `reviews/code-RR-24.md` applied):
 - **Sales (m1, m4, m5, m8, m9):** refunds are not sales (`s.parent_id = 0`, `type => shop_order`); stats statuses are cut to WooCommerce's 20 characters; table names compare case-insensitively; the fallback keeps its last complete set for a week and rebuilds after 12 hours without blanking the card ("Checking recent sales" only on the very first run); sold products' posts are primed before pool resolution.
 - **Scope (m2):** the recent rating and the low-review replies cover the catalog, like the all-time figure.
 - **Copy (m10, m12):** "No sales in the recent window, so nothing to check." / "No product that sold recently has gone without a review …"; the arrow compares the one-decimal figures the card shows; `star` is sanitized; the CSS has its own comment.
-- **Deferred (m3):** Pro product-group members (RR-19) count as "without reviews" in Coverage; RR-19 owns the group map and adjusts Coverage when it is built.
+- **Shared reviews (RR-19 prerequisite):** "Going stale" groups the sold listings by `Pool::resolve_id()` and names the listing that sold when its pool's newest review is old (RR-19 AC17); the all-time rating counts each pool once, because a listing sharing another's reviews carries the same mirrored figures. Coverage needs no change: RR-19 mirrors the shared count onto each member, so members count as reviewed (m3 settled).
 - **Tests:** rr-24.php 22/22 (adds refunds, a variation sale, drafts in the list, each trigger, the stale/12-hour reschedule, the change-during-job case, the All Reviews low filter, `$pagenow`, the dry-run transients and hooks).
 
 Rev 4 (reconciled with the code after RR-11 to RR-23, before building):
