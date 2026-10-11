@@ -1,10 +1,17 @@
 # RR-22: Service recovery (low-rating alerts, cases and update invitations)
 
-Status: building (rev 5) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Depends on RR-00 (F1, F4, F6, F8.1, F8.2 Pro task, F8.3, F9), RR-15 (`update()` with its edit window and invite exemption, pending revisions, prefill rule, edit form partial), RR-09 (token API pattern) · Raises `NDVR_API` to **11** (RR-00 F3b; planned build order, final at merge) · **Innovation:** no competitor combines these steps self-hosted. Parts exist elsewhere: Judge.me's support prompt, WiserReview's "ask to revise".
+Status: built (rev 6) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Depends on RR-00 (F1, F4, F6, F8.1, F8.2 Pro task, F8.3, F9), RR-15 (`update()` with its edit window and invite exemption, pending revisions, prefill rule, edit form partial), RR-09 (token API pattern) · Raises `NDVR_API` to **11** (RR-00 F3b; planned build order, final at merge) · **Innovation:** no competitor combines these steps self-hosted. Parts exist elsewhere: Judge.me's support prompt, WiserReview's "ask to revise".
 
 Review findings applied: round 2 RR-22 items 1 (legal: case and invite decoupled from the rating), 2 (edit window in `update()`, invite exemption, prefill) and 3 (`rating` key); round 3 batch B items 3 (ownership check for guest `list_link` reviews), 4 (invite lock re-reads `invited_at` and is kept), 5 (edit branch before `resolve()`, used-token and PRG states) and 7 (callers pass `submitted_at` to `apply_pending_edit()`).
 
 `ReviewRepository`, `TokenRepository` and `Mailer` are instance services reached through the container. `Class::method()` below names the method, not a static call.
+
+Rev 6 (as built):
+- **Service** `recovery` (`Reviews\Recovery`, Registerable). The settings card reads every stored value itself and prints the "on this form" markers for its render-less fields (the bug the RR-21 review found in that feature's card); the harness posts the card through `sanitize_page()`.
+- **Alerts and the moderation notice:** the low-rating alert is separate from free's "new review awaiting approval" email (`admin_notify`), which keeps its own setting. A pending low review can send both when both are on.
+- **Pro RR-22P-1 (built):** `Plus::alert_handled( $handled, $id, $rating )` returns true only while Pro's alert is on and the rating is within Pro's threshold. A review only free's (higher) threshold covers still gets free's alert, so no review is left without one.
+- **Release gate:** `Recovery::INVITES_SIGNED_OFF` is false; invitations stay hidden until OC-13 (TASKS) is recorded.
+- **Tests:** rr-22.php 43/43 (AC1–AC20, the settings round trip and guard tests); Pro rr-22p.php 3/3. Mutations: 23/24 killed; the survivor (dropping the invited-meta check from `can_invite()`) is equivalent because `send_invite()` re-checks it.
 
 Rev 5 (reconciled with the code after RR-11 to RR-21, before building):
 - **API level:** RR-20 took 11 and RR-21 took 12, so this feature raises `NDVR_API` to **13** (every "11" in §6 and §5's Pro tasks means 13).

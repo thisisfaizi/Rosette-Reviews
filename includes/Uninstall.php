@@ -50,7 +50,9 @@ final class Uninstall {
 				'ndv_reviews_upgrade_error',
 				'ndv_reviews_media_resweep_cursor',
 			),
-			'option_prefixes'       => array(),
+			'option_prefixes'       => array(
+				'ndv_reviews_invite_lock_', // RR-22.
+			),
 			'transients'            => array(
 				'ndv_reviews_activated',
 				'ndvr_upgrade_backoff',
@@ -62,12 +64,17 @@ final class Uninstall {
 				'ndvr_rl_',
 				'ndvr_request_stats_',
 				'ndvr_order_action_notice_',
+				'ndvr_edit_saved_', // RR-22.
 			),
 			'comment_meta'          => array(
 				'_ndvr_risk',
 				'_ndvr_risk_reasons',
 				'_ndvr_risk_held',
 				'_ndvr_token_id',
+				'_ndvr_recovery_status',
+				'_ndvr_recovery_note',
+				'_ndvr_recovery_resolved_at',
+				'_ndvr_recovery_invited_at',
 				'_ndvr_overall_rating',
 				'_ndvr_source',
 				'_ndvr_verified',

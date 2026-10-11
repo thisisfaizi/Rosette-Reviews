@@ -357,6 +357,8 @@ class TestimonialForm implements Registerable {
 
 		$this->antispam->record();
 
-		wp_send_json_success( array( 'message' => __( 'Thank you. Your review is awaiting moderation.', 'rosette-reviews' ) ) );
+		/** This filter is documented in includes/Forms/ReviewForm.php */
+		$message = (string) apply_filters( 'ndv-reviews/submit_success_message', __( 'Thank you. Your review is awaiting moderation.', 'rosette-reviews' ), (int) $result, array( 'source' => 'form' ) );
+		wp_send_json_success( array( 'message' => wp_strip_all_tags( $message ) ) );
 	}
 }

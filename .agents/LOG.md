@@ -948,3 +948,13 @@ EVIDENCE: rr-21 24/24; AC13 17.4 ms/score (3,000 extra reviews, SQLite); Pro rr-
   help (card + readme), M3 Pro auto-approve help follows `hold_high()`; minors m1–m4, m6–m11, m13, m14 in code, m5/m12
   in the PRD (rev 7). The harness short-circuits mail (the QA machine has no mail server: 2 s per send).
 EVIDENCE: rr-21 50/50 (T1–T11 added); Pro rr-14p 4/4 (T12); mutations 27/27 killed (one survivor, the view's risk_pending filter, got a test).
+
+## 2026-10-11 — RR-22 service recovery built → in_review
+- PRD rev 5 reconciled (NDVR_API 13, RR-15 editor in place, trusted email in free, release gate), rev 6 as built.
+  Service `recovery`; edit token type; success-message filter in the three forms; landing edit branch before
+  `resolve()` and 403 for edit tokens on submit; privacy/uninstall keys. The settings card reads the stored values and
+  marks its render-less fields (the RR-21 lesson), with a round-trip test.
+- Pro RR-22P-1: `Plus::alert_handled()` is rating-aware (true only within Pro's own threshold), so a review only free's
+  higher threshold covers still gets an alert.
+- Invitations ship hidden (`Recovery::INVITES_SIGNED_OFF` false) until owner check OC-13 (legal sign-off).
+EVIDENCE: rr-22 43/43; Pro rr-22p 3/3; mutations 23/24 killed (1 equivalent: send_invite() re-checks invited meta).

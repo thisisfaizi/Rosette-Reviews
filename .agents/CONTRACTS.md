@@ -374,3 +374,14 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   `review_risk_scored( $id, $score, $reasons, $held )`. Settings `integrity_enabled`, `integrity_hold_high` (true). Moderation
   column `risk`, view `high_risk` (`&risk_pending=1` lists only pending). Transparency key `integrity`. Rev 7: static
   `count_links( $text )`, `forget_counts()`; the scorer context takes `title`; transient `ndvr_risk_counts` (5 min).
+- RR-22 (NDVR_API 13): service `recovery` = `Reviews\Recovery` (`status()`, `set_status()`, `invites_available()`,
+  `invites_on()`, `can_invite()`, `invite()`, `edit_page( $row, $raw )`). Settings `recovery_threshold` (0–3, 2),
+  `recovery_alert_email`, `recovery_support`, `recovery_message`, `recovery_invites` (false). Comment meta
+  `_ndvr_recovery_status` (open|resolved), `_ndvr_recovery_note`, `_ndvr_recovery_resolved_at`, `_ndvr_recovery_invited_at`.
+  Token type `edit` (`TokenRepository::create_edit_token()`, `consume()`; products `{"comment_id":ID}`, 14 days).
+  `Sources::trusted_email( WP_Comment )`. Filters `submit_success_message`, `recovery_alert_handled( $handled, $id,
+  $rating )`, `recovery_rating`, `recovery_invites_available` (default `Recovery::INVITES_SIGNED_OFF` = false until OC-13);
+  actions `low_rating_received`, `recovery_resolved`, `recovery_invited`. View `open_cases`; row actions `recovery_open`,
+  `recovery_resolve`, `recovery_reopen`, `recovery_invite`. Option prefix `ndv_reviews_invite_lock_`, transient prefix
+  `ndvr_edit_saved_`. Transparency key `recovery`, fact `edit_invites`. Pro RR-22P-1: `Moderation\Plus::alert_handled()`
+  is true only while Pro's low-rating alert is on and the rating is within its threshold.

@@ -164,7 +164,7 @@ class TokenRepository {
 		$inserted = $wpdb->insert( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			Db::table( 'review_tokens' ),
 			array(
-				'type'        => in_array( $type, array( 'customer', 'test', 'list' ), true ) ? $type : 'order',
+				'type'        => in_array( $type, array( 'customer', 'test', 'list', 'edit' ), true ) ? $type : 'order',
 				'order_id'    => $order_id ? absint( $order_id ) : null,
 				'customer_id' => $customer_id ? absint( $customer_id ) : null,
 				'email_hash'  => $this->hash_email( $email ),
@@ -190,6 +190,45 @@ class TokenRepository {
 			'raw' => $raw,
 			'id'  => (int) $wpdb->insert_id,
 		);
+	}
+
+	/**
+	 * A single-use link to update one review (RR-22): no order, the review
+	 * id in `products`, a fixed 14-day lifetime.
+	 *
+	 * @param int    $comment_id Review.
+	 * @param string $email      The review's trusted email.
+	 * @param int    $user_id    The review's account, or 0.
+	 * @return array{raw:string,id:int}
+	 */
+	public function create_edit_token( $comment_id, $email, $user_id = 0 ) {
+		global $wpdb;
+		$created = $this->create_row( 'edit', null, $user_id ? absint( $user_id ) : null, $email, array(), \NdvReviews\Reviews\Recovery::INVITE_TTL );
+		if ( $created['id'] ) {
+			$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				Db::table( 'review_tokens' ),
+				array( 'products' => wp_json_encode( array( 'comment_id' => absint( $comment_id ) ) ) ),
+				array( 'id' => (int) $created['id'] ),
+				array( '%s' ),
+				array( '%d' )
+			);
+		}
+
+		return $created;
+	}
+
+	/**
+	 * Mark an active token used, atomically: true for exactly one caller.
+	 *
+	 * @param int $id Token id.
+	 * @return bool
+	 */
+	public function consume( $id ) {
+		global $wpdb;
+		$table = Db::table( 'review_tokens' );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		return 1 === (int) $wpdb->query( $wpdb->prepare( "UPDATE `{$table}` SET status = 'used', used_at = %s WHERE id = %d AND status = 'active'", current_time( 'mysql', true ), absint( $id ) ) );
 	}
 
 	/**

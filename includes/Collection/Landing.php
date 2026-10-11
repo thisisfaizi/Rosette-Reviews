@@ -153,9 +153,17 @@ class Landing implements Registerable {
 			return;
 		}
 
-		$row = $this->tokens->resolve( $raw );
-
 		nocache_headers();
+
+		// RR-22: a link to update one review handles all its own states
+		// (active, used, expired) before resolve(), which hides used ones.
+		$any = $this->tokens->lookup( $raw );
+		if ( $any && 'edit' === $any->type ) {
+			$this->output_page( \NdvReviews\Plugin::instance()->container()->get( 'recovery' )->edit_page( $any, $raw ) );
+			exit;
+		}
+
+		$row = $this->tokens->resolve( $raw );
 
 		// Record the first time the link from a review request was opened
 		// (one UPDATE, first view only; test links are never counted).
@@ -292,6 +300,9 @@ class Landing implements Registerable {
 		$row = $this->tokens->resolve( $raw );
 		if ( ! $row ) {
 			wp_send_json_error( array( 'message' => __( 'This link is no longer valid. Please request a fresh one.', 'rosette-reviews' ) ), 410 );
+		}
+		if ( 'edit' === $row->type ) {
+			wp_send_json_error( array( 'message' => __( 'This link can\'t be used to write a new review.', 'rosette-reviews' ) ), 403 );
 		}
 		// RR-08: the customer's messages in the order's language. An error
 		// response ends the request; the review itself is stored in the site
@@ -451,13 +462,16 @@ class Landing implements Registerable {
 		$approved = 'approved' === wp_get_comment_status( $result );
 		$message  = \NdvReviews\Plugin::instance()->container()->get( 'multilingual' )->with_locale(
 			$lang['locale'],
-			static function () use ( $approved ) {
-				return $approved
+			static function () use ( $approved, $result, $is_list ) {
+				$message = $approved
 					? __( 'Thank you. Your review is published.', 'rosette-reviews' )
 					: __( 'Thank you. Your review was submitted and is awaiting moderation.', 'rosette-reviews' );
+
+				/** This filter is documented in includes/Forms/ReviewForm.php */
+				return (string) apply_filters( 'ndv-reviews/submit_success_message', $message, (int) $result, array( 'source' => $is_list ? 'list_link' : 'magic_link' ) );
 			}
 		);
-		wp_send_json_success( array( 'message' => $message ) );
+		wp_send_json_success( array( 'message' => wp_strip_all_tags( $message ) ) );
 	}
 
 	/**

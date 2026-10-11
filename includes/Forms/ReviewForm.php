@@ -676,9 +676,20 @@ class ReviewForm implements Registerable {
 
 		$this->antispam->record();
 
+		/**
+		 * Filter the success message after a review is submitted (plain text:
+		 * the script shows it as text). RR-22 adds the support message after a
+		 * low rating.
+		 *
+		 * @param string              $message    Message.
+		 * @param int                 $comment_id The new review.
+		 * @param array<string,mixed> $data       Context (source).
+		 */
+		$message = (string) apply_filters( 'ndv-reviews/submit_success_message', __( 'Thank you. Your review has been submitted and is awaiting moderation.', 'rosette-reviews' ), (int) $result, array( 'source' => 'onsite' ) );
+
 		wp_send_json_success(
 			array(
-				'message' => __( 'Thank you. Your review has been submitted and is awaiting moderation.', 'rosette-reviews' ),
+				'message' => wp_strip_all_tags( $message ),
 			)
 		);
 	}

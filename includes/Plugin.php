@@ -265,6 +265,13 @@ final class Plugin {
 		);
 
 		$c->set(
+			'recovery',
+			static function ( $c ) {
+				return new \NdvReviews\Reviews\Recovery( $c->get( 'settings' ) );
+			}
+		);
+
+		$c->set(
 			'integrity',
 			static function ( $c ) {
 				return new \NdvReviews\Integrity\Scorer( $c->get( 'settings' ) );
@@ -578,6 +585,7 @@ final class Plugin {
 			$this->container->get( 'votes' ),
 			$this->container->get( 'reports' ),
 			$this->container->get( 'integrity' ),
+			$this->container->get( 'recovery' ),
 			$this->container->get( 'review_edits' ),
 			$this->container->get( 'myaccount_reviews' ),
 			$this->container->get( 'pending_edits' ),

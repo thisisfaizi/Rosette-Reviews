@@ -53,6 +53,30 @@ class Sources {
 	}
 
 	/**
+	 * The review author's trusted email (RR-22 §8, the one rule): the account
+	 * email of a signed-in reviewer, or the address a review link was mailed
+	 * to (magic_link, list_link). '' for an address a guest typed.
+	 *
+	 * @param \WP_Comment $comment Review.
+	 * @return string
+	 */
+	public static function trusted_email( \WP_Comment $comment ) {
+		$user_id = (int) $comment->user_id;
+		if ( $user_id > 0 ) {
+			$user = get_userdata( $user_id );
+			if ( $user ) {
+				return is_email( $user->user_email ) ? (string) $user->user_email : '';
+			}
+		}
+		$source = (string) get_comment_meta( (int) $comment->comment_ID, '_ndvr_source', true );
+		if ( in_array( $source, array( 'magic_link', 'list_link' ), true ) && is_email( $comment->comment_author_email ) ) {
+			return (string) $comment->comment_author_email;
+		}
+
+		return '';
+	}
+
+	/**
 	 * Whether the customer who wrote a review may change it: the source is
 	 * customer-written and the review isn't synced from an external site.
 	 *
