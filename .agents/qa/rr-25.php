@@ -89,6 +89,7 @@ final class NDVR_QA_RR25 {
 			$this->ac9();
 			$this->settings_card();
 			$this->review_fixes();
+			$this->json_ld_emptied();
 		} catch ( \Throwable $e ) {
 			$this->ok( false, 'uncaught ' . get_class( $e ) . ': ' . $e->getMessage() . ' @ ' . basename( $e->getFile() ) . ':' . $e->getLine() );
 		}
@@ -662,6 +663,25 @@ final class NDVR_QA_RR25 {
 		return preg_match( '#<script type="application/ld\+json">(.*?)</script>#s', $html, $m ) ? json_decode( $m[1], true ) : null;
 	}
 
+	/**
+	 * RR-19 m7: a filter that removes the rating and the reviews leaves no
+	 * Product node (one with neither is invalid).
+	 *
+	 * @return void
+	 */
+	private function json_ld_emptied() {
+		$id     = $this->product( 'RR25 Emptied' );
+		$this->rate( $id );
+		$before = $this->standalone( $id );
+		$strip  = static function ( $data ) {
+			unset( $data['aggregateRating'], $data['review'] );
+			return $data;
+		};
+		add_filter( 'ndv-reviews/json_ld', $strip );
+		$after = $this->standalone( $id );
+		remove_filter( 'ndv-reviews/json_ld', $strip );
+		$this->ok( is_array( $before ) && ! empty( $before['aggregateRating'] ) && null === $after, 'RR-19 m7: when a json_ld filter removes the rating and the reviews, no Product node is printed' );
+	}
 	/**
 	 * Forget that WooCommerce's node was enriched (a new page).
 	 *

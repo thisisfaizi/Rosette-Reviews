@@ -1032,3 +1032,8 @@ EVIDENCE: rr-24 23/23, rr-22 59/59 (pool cases through the generic `review_pool_
 - The shortcode now accepts `show_summary` (the block and the widget already did), so its summary and footer notes
   (transparency, Pro's shared-listings note) show on that surface too.
 EVIDENCE: rr-03 62/62 (adds the shortcode check).
+
+## 2026-10-11 — JSON-LD: no Product node once a filter removed the rating and the reviews (RR-19 review m7)
+- `JsonLd::maybe_output()` prints nothing when the `ndv-reviews/json_ld` filter leaves neither `aggregateRating` nor
+  `review` (Pro's `groups_schema_mode = main_only` does that on member listings); a bare Product node is invalid.
+EVIDENCE: rr-25 adds the check (filter strips both → no script printed).

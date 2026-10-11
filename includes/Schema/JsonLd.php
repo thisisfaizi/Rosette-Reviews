@@ -252,6 +252,12 @@ class JsonLd implements Registerable {
 		 * @param int   $product_id Product id.
 		 */
 		$data = apply_filters( 'ndv-reviews/json_ld', $data, $product_id );
+		// A filter removed the rating and the reviews (for example a listing whose
+		// rating shows only on another product): a Product node with neither is
+		// invalid, so print nothing.
+		if ( ! is_array( $data ) || ( empty( $data['aggregateRating'] ) && empty( $data['review'] ) ) ) {
+			return;
+		}
 
 		// JSON_HEX_TAG (+ the accompanying HEX flags) escape </script>-breakout
 		// sequences at the JSON layer itself — defense in depth alongside the
