@@ -973,3 +973,10 @@ EVIDENCE: rr-23 14/14; mutations 21/23 killed (2 equivalent, see PRD rev 4); own
   contact accepts a phone number (m5); the alert no longer suggests opening a case (m6); invitation help only where
   invitations exist (m7); edit-token write checked (m10); page title, card copy, count, export labels (m13). PRD rev 7.
 EVIDENCE: rr-22 58/58; Pro rr-22p 3/3; fix mutations 16/17 killed (1 equivalent).
+
+## 2026-10-11 — RR-23 code review fixed → done
+- Review `prd/reviews/code-RR-23.md` (0 B, 1 M, 9 m, 10 T): the exact purchase time no longer leaves the server when no
+  label shows, and Pro's public REST route returns only the label (M1); list links check the email's account (m1); no
+  backfill scheduling on AJAX, unique enqueues (m2); Elementor sample, selectors and gate (m3–m5); comment, unused
+  dependency, readme privacy bullets (also RR-21/RR-22), CSS separator (m6–m9). PRD rev 5.
+EVIDENCE: rr-23 22/22; Pro rr-23p 2/2; fix mutations 5/5 killed. HPOS on/off and Elementor: OC-14.

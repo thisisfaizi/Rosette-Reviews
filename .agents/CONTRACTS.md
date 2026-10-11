@@ -393,4 +393,6 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   `show_ownership_time( $show, $review )`, `ownership_time_text( $text, $review, $seconds )`, `purchase_date_order_limit` (20).
   Setting `ownership_time` (true). AS hook `ndvr_backfill_purchase_dates` (arg: last id); options
   `ndv_reviews_backfill_purchase_done` (autoload yes), `ndv_reviews_backfill_purchase_cursor`. CSS `.ndvr-ownership`.
-  Pro RR-23P-1: Elementor "Review Date" part switch `ownership` (on) at `free_api( 14 )`.
+  Pro RR-23P-1: Elementor "Review Date" part switch `ownership` (on) at `free_api( 14 )`. Rev 5: `purchased_at` is '' unless
+  verified and `ownership_time` is on; Pro REST items carry `ownership_text` instead of `purchased_at`; `PurchaseDates` has
+  no constructor arguments.

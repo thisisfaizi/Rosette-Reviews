@@ -55,6 +55,9 @@ Rosette Reviews replaces the default WooCommerce reviews tab with a review secti
 * Checkout consent: if you turn it on, Rosette Reviews saves the customer's answer, the time and the checkbox wording on the order. They are included in WordPress personal data exports and erasures.
 * Review reports: a report stores the reason, the optional note and, for a signed-in shopper, their account id. Their reports are included in personal data exports and removed by erasure. Reports from guests are stored with a one-way hash of their IP address and are deleted with the review, or when the plugin's data is removed on uninstall.
 * Review edits: edits a customer makes to a review are kept until a moderator applies or discards them. The proposed edit and the date an edit was applied are included in personal data exports; erasure removes the proposed edit, while the "Edited" date stays with the review so a changed review still says so.
+* Review checks: each new customer review gets a risk score with the plain-language reasons, worked out on your server (nothing is sent to another service). The score and reasons are included in personal data exports and removed by erasure.
+* Low-rating follow-up: a private case on a review keeps its status, the dates it was resolved or an invitation was sent, and your note. They are included in personal data exports and removed by erasure.
+* Purchase date: for verified reviews, the date of the matching order is stored with the review to show how long after purchase it was written. It is included in personal data exports and removed by erasure.
 
 = Shortcodes =
 

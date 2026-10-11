@@ -408,6 +408,7 @@ button.ndvr-bar-row.is-current .ndvr-bar-track { background: var(--ndvr-line); }
 /* RR-15: a review the customer changed (an applied edit). */
 .ndvr-review-edited { color: var(--ndvr-slate); font-size: 0.8em; font-style: italic; }
 .ndvr-ownership { color: var(--ndvr-slate); font-size: 0.8em; }
+.ndvr-review-meta .ndvr-ownership::before { content: "\00B7"; margin-right: 10px; }
 
 /* RR-15: My Account → Reviews. */
 .ndvr-account-reviews { display: grid; gap: 28px; font-family: var(--ndvr-font); color: var(--ndvr-ink); }

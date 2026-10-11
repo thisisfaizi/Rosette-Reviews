@@ -432,6 +432,21 @@ class ReviewQuery {
 	}
 
 	/**
+	 * A review's purchase date for the view (RR-23), or '' when the label is
+	 * off or the review isn't verified.
+	 *
+	 * @param int $id Review.
+	 * @return string GMT `Y-m-d H:i:s` or ''.
+	 */
+	private function purchased_at( $id ) {
+		if ( ! get_comment_meta( $id, '_ndvr_verified', true ) || ! \NdvReviews\Plugin::instance()->container()->get( 'settings' )->get( 'ownership_time', true ) ) {
+			return '';
+		}
+
+		return (string) get_comment_meta( $id, PurchaseDates::META, true );
+	}
+
+	/**
 	 * Build a display view-model from a comment.
 	 *
 	 * @param \WP_Comment               $comment      Comment.
@@ -460,7 +475,8 @@ class ReviewQuery {
 			'date'             => $comment->comment_date,
 			// RR-23 (NDVR_API 14).
 			'date_gmt'         => $comment->comment_date_gmt,
-			'purchased_at'     => (string) get_comment_meta( $id, PurchaseDates::META, true ),
+			// '' unless verified and the label is on: the exact time is personal data.
+			'purchased_at'     => $this->purchased_at( $id ),
 			'content'          => $comment->comment_content,
 			'title'            => (string) get_comment_meta( $id, '_ndvr_title', true ),
 			'overall'          => (float) get_comment_meta( $id, '_ndvr_overall_rating', true ),

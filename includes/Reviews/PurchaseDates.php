@@ -7,7 +7,6 @@
 
 namespace NdvReviews\Reviews;
 
-use NdvReviews\Support\Settings;
 use NdvReviews\Support\Registerable;
 
 defined( 'ABSPATH' ) || exit;
@@ -25,22 +24,6 @@ class PurchaseDates implements Registerable {
 	const DONE_OPTION   = 'ndv_reviews_backfill_purchase_done';
 	const CURSOR_OPTION = 'ndv_reviews_backfill_purchase_cursor';
 	const BATCH         = 100;
-
-	/**
-	 * Settings.
-	 *
-	 * @var Settings
-	 */
-	private $settings;
-
-	/**
-	 * Constructor.
-	 *
-	 * @param Settings $settings Settings.
-	 */
-	public function __construct( Settings $settings ) {
-		$this->settings = $settings;
-	}
 
 	/**
 	 * Hooks.
@@ -108,13 +91,20 @@ class PurchaseDates implements Registerable {
 		$order_id = isset( $context['order_id'] ) ? absint( $context['order_id'] ) : 0;
 		// The email is trusted only when a link proved the mailbox: a customer
 		// token (magic_link without an order) or an uploaded-list link.
-		$email = ( 'list_link' === $source || ( 'magic_link' === $source && ! $order_id ) ) && isset( $context['email'] ) ? sanitize_email( (string) $context['email'] ) : '';
-		$date  = $this->lookup(
+		$email   = ( 'list_link' === $source || ( 'magic_link' === $source && ! $order_id ) ) && isset( $context['email'] ) ? sanitize_email( (string) $context['email'] ) : '';
+		$user_id = isset( $context['user_id'] ) ? (int) $context['user_id'] : 0;
+		// A list link proves the mailbox, so the account that owns it counts too
+		// (WooCommerce's bought check, which verified the review, does the same).
+		if ( 'list_link' === $source && ! $user_id && '' !== $email ) {
+			$owner   = get_user_by( 'email', $email );
+			$user_id = $owner ? (int) $owner->ID : 0;
+		}
+		$date = $this->lookup(
 			array(
 				'product_id' => isset( $context['product_id'] ) ? (int) $context['product_id'] : 0,
 				'pool_id'    => isset( $context['pool_id'] ) ? (int) $context['pool_id'] : 0,
 				'order_id'   => $order_id,
-				'user_id'    => isset( $context['user_id'] ) ? (int) $context['user_id'] : 0,
+				'user_id'    => $user_id,
 				'email'      => $email,
 				'before'     => time(),
 			)
@@ -147,7 +137,8 @@ class PurchaseDates implements Registerable {
 		}
 
 		$best = '';
-		// customer_id and billing_email in one query would AND them: two queries.
+		// One query per key, each with its own limit of recent orders, so a busy
+		// account can't crowd out the guest checkouts on the same email.
 		$who = array(
 			'customer_id'   => isset( $q['user_id'] ) ? (int) $q['user_id'] : 0,
 			'billing_email' => isset( $q['email'] ) ? (string) $q['email'] : '',
@@ -264,13 +255,14 @@ class PurchaseDates implements Registerable {
 	 * @return void
 	 */
 	public function maybe_schedule() {
-		if ( get_option( self::DONE_OPTION ) || ! function_exists( 'as_has_scheduled_action' ) || ! function_exists( 'as_enqueue_async_action' ) ) {
+		// Not on admin-ajax (storefront submits run admin_init too).
+		if ( wp_doing_ajax() || get_option( self::DONE_OPTION ) || ! function_exists( 'as_has_scheduled_action' ) || ! function_exists( 'as_enqueue_async_action' ) ) {
 			return;
 		}
 		if ( as_has_scheduled_action( self::HOOK ) ) {
 			return;
 		}
-		as_enqueue_async_action( self::HOOK, array( (int) get_option( self::CURSOR_OPTION, 0 ) ), 'ndv-reviews' );
+		as_enqueue_async_action( self::HOOK, array( (int) get_option( self::CURSOR_OPTION, 0 ) ), 'ndv-reviews', true );
 	}
 
 	/**
@@ -324,7 +316,7 @@ class PurchaseDates implements Registerable {
 		// The cursor survives a crash; the queued argument carries it normally.
 		update_option( self::CURSOR_OPTION, $last, false );
 		if ( function_exists( 'as_enqueue_async_action' ) ) {
-			as_enqueue_async_action( self::HOOK, array( $last ), 'ndv-reviews' );
+			as_enqueue_async_action( self::HOOK, array( $last ), 'ndv-reviews', true );
 		}
 	}
 }

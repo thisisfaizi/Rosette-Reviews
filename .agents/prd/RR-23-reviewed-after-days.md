@@ -1,8 +1,16 @@
 # RR-23: "Reviewed N weeks after purchase"
 
-Status: built (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **14** (rev 4) (RR-00 F3b; planned build order, final at merge) · **Innovation:** no competitor shows ownership time on a review.
+Status: built (rev 5) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **14** (rev 4) (RR-00 F3b; planned build order, final at merge) · **Innovation:** no competitor shows ownership time on a review.
 
 Round 2: passed; rev 3 only adds the `NDVR_API` level for the Pro-facing helper.
+
+Rev 5 (code review `reviews/code-RR-23.md` applied):
+- **Privacy (M1):** the view key `purchased_at` is filled only while the review is verified and `ownership_time` is on, so the exact time never leaves the server when no label shows. Pro's public `GET /ndv-reviews/v2/reviews` drops `purchased_at` and adds `ownership_text` (the label, or '').
+- **List links (m1):** a verified `list_link` review also checks the orders of the account that owns the proven email.
+- **Scheduling (m2):** `maybe_schedule()` skips admin-ajax requests; both enqueues pass `$unique = true`, so only one backfill chain exists.
+- **Pro (m3–m5):** the Elementor sample review has dates so the switch shows in the editor; the part's colour and typography reach `.ndvr-ownership`; the switch is registered only at `free_api( 14 )`.
+- **Docs and nits (m6–m9):** the two-query comment is corrected (one query per key keeps a busy account from crowding out guest checkouts); the unused `Settings` dependency is gone; the readme's privacy section lists the purchase date (and the RR-21/RR-22 data); the meta line puts a "·" before the label in CSS.
+- **Tests:** rr-23.php 22/22 (adds the view-model privacy check, list links, variations, a paid order without a paid date, the backfill's upper bound, scheduling and the next-batch argument, a +05:00 time zone, the order limit); Pro rr-23p.php 2/2 (the REST payload). Fix mutations 5/5 killed. HPOS on/off and Elementor stay owner checks (OC-14; the QA site runs one order storage and has no Elementor).
 
 Rev 4 (reconciled with the code after RR-11 to RR-22, before building):
 - **API level:** RR-20 took 11, RR-21 12 and RR-22 13, so this feature raises `NDVR_API` to **14** (every "12" in §5/§6 means 14).

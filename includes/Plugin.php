@@ -266,8 +266,8 @@ final class Plugin {
 
 		$c->set(
 			'purchase_dates',
-			static function ( $c ) {
-				return new \NdvReviews\Reviews\PurchaseDates( $c->get( 'settings' ) );
+			static function () {
+				return new \NdvReviews\Reviews\PurchaseDates();
 			}
 		);
 

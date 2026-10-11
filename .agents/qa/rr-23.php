@@ -86,6 +86,7 @@ final class NDVR_QA_RR23 {
 			$this->ac9();
 			$this->ac10();
 			$this->settings_card();
+			$this->review_fixes();
 		} catch ( \Throwable $e ) {
 			$this->ok( false, 'uncaught ' . get_class( $e ) . ': ' . $e->getMessage() . ' @ ' . basename( $e->getFile() ) . ':' . $e->getLine() );
 		}
@@ -480,6 +481,173 @@ final class NDVR_QA_RR23 {
 		$this->ok( in_array( 'ownership_time', $m[1], true ) && ! preg_match( '#name="ownership_time" value="1"\s+checked#', $html ) && true === ( $saved['ownership_time'] ?? null ), 'Settings: the card shows the stored value (off), marks the field and saves a ticked box as on' );
 	}
 
+	/**
+	 * Code review RR-23 (M1, m1, m2, T1–T5, T7, T8): the view hides the exact
+	 * time when the label is off, list links, variations, a paid order with
+	 * no paid date, the backfill's upper bound, scheduling, time zones and
+	 * the order limit.
+	 *
+	 * @return void
+	 */
+	private function review_fixes() {
+		global $wpdb;
+		$s  = $this->c()->get( 'purchase_dates' );
+		$q  = $this->c()->get( 'review_query' );
+		$id = $this->fx['ac1'] ?? 0;
+
+		// M1: the exact purchase time leaves only with the label.
+		// (AC10 erased this review's date; put one back.)
+		update_comment_meta( $id, PurchaseDates::META, gmdate( 'Y-m-d H:i:s', time() - 9 * DAY_IN_SECONDS ) );
+		$on = $q->to_view( get_comment( $id ) );
+		$this->set( array( 'ownership_time' => false ) );
+		$off = $q->to_view( get_comment( $id ) );
+		$this->set( array( 'ownership_time' => true ) );
+		update_comment_meta( $id, '_ndvr_verified', 0 );
+		$unverified = $q->to_view( get_comment( $id ) );
+		update_comment_meta( $id, '_ndvr_verified', 1 );
+		$this->ok( '' !== $on['purchased_at'] && '' === $off['purchased_at'] && '' === $unverified['purchased_at'], 'M1: the view model carries the purchase time only while the label is on and the review is verified' );
+
+		// T1 + m1: a list link's proven email finds that account's orders; an unverified one gets nothing.
+		$u     = $this->user();
+		$email = get_userdata( $u )->user_email;
+		$this->order( array( $this->fx['p1'] ), time() - 6 * DAY_IN_SECONDS, array( 'customer_id' => $u, 'billing_email' => 'rr23-other-' . wp_generate_password( 4, false, false ) . '@example.invalid' ) );
+		$list = $this->seed( $this->fx['p1'] );
+		$s->record(
+			$list,
+			array(
+				'product_id' => $this->fx['p1'],
+				'email'      => $email,
+				'source'     => 'list_link',
+				'verified'   => true,
+			)
+		);
+		$plain = $this->seed( $this->fx['p1'] );
+		$s->record(
+			$plain,
+			array(
+				'product_id' => $this->fx['p1'],
+				'email'      => $email,
+				'source'     => 'list_link',
+				'verified'   => false,
+			)
+		);
+		$this->ok( '' !== (string) get_comment_meta( $list, PurchaseDates::META, true ) && '' === (string) get_comment_meta( $plain, PurchaseDates::META, true ), 'T1: a verified list-link review finds the order on the account that owns the email; an unverified one gets nothing' );
+
+		// T2: a variation sold, the review on the parent (or the variation itself).
+		$parent = new \WC_Product_Variable();
+		$parent->set_name( 'RR23 Variable' );
+		$parent->set_status( 'publish' );
+		$pid       = (int) $parent->save();
+		$variation = new \WC_Product_Variation();
+		$variation->set_parent_id( $pid );
+		$variation->set_regular_price( '10' );
+		$vid                    = (int) $variation->save();
+		$this->fx['products'][] = $vid;
+		$this->fx['products'][] = $pid;
+		$vorder                 = $this->order( array( $vid ), time() - 4 * DAY_IN_SECONDS );
+		$by_parent              = $s->lookup( array( 'product_id' => $pid, 'order_id' => $vorder ) );
+		$by_variation           = $s->lookup( array( 'product_id' => $vid, 'pool_id' => $pid, 'order_id' => $vorder ) );
+		$other                  = $s->lookup( array( 'product_id' => $this->fx['p2'], 'order_id' => $vorder ) );
+		$this->ok( '' !== $by_parent && '' !== $by_variation && '' === $other, 'T2: an order for a variation counts for the parent product and the variation, not for another product' );
+
+		// T3: a paid order with no paid date uses its created date.
+		$created = time() - 8 * DAY_IN_SECONDS;
+		$legacy  = $this->order( array( $this->fx['p2'] ), $created );
+		$o       = wc_get_order( $legacy );
+		$o->set_date_paid( null );
+		$o->save();
+		$this->ok( null === wc_get_order( $legacy )->get_date_paid() && gmdate( 'Y-m-d H:i:s', $created ) === $s->lookup( array( 'product_id' => $this->fx['p2'], 'order_id' => $legacy ) ), 'T3: a paid order without a paid date uses the date it was placed' );
+
+		// T4: the backfill's upper bound is the review's own date.
+		$late  = $this->order( array( $this->fx['p3'] ), time() - 30 * DAY_IN_SECONDS );
+		$early = $this->seed( $this->fx['p3'], time() - 40 * DAY_IN_SECONDS );
+		add_comment_meta( $early, '_ndvr_order_id', $late );
+		add_comment_meta( $early, '_ndvr_verified', 1 );
+		delete_option( PurchaseDates::DONE_OPTION );
+		delete_option( PurchaseDates::CURSOR_OPTION );
+		update_option( PurchaseDates::CURSOR_OPTION, $early - 1, false );
+		$s->backfill( 0 );
+		$this->ok( '' === (string) get_comment_meta( $early, PurchaseDates::META, true ), 'T4: the backfill doesn\'t give a review 40 days old an order paid 30 days ago' );
+
+		// T5 + m2: scheduling (not on AJAX), one chain, the next batch carries the cursor.
+		as_unschedule_all_actions( PurchaseDates::HOOK );
+		delete_option( PurchaseDates::DONE_OPTION );
+		delete_option( PurchaseDates::CURSOR_OPTION );
+		$ajax = static function () {
+			return true;
+		};
+		add_filter( 'wp_doing_ajax', $ajax );
+		$s->maybe_schedule();
+		remove_filter( 'wp_doing_ajax', $ajax );
+		$on_ajax = as_has_scheduled_action( PurchaseDates::HOOK );
+		$s->maybe_schedule();
+		$s->maybe_schedule();
+		$queued = count( as_get_scheduled_actions( array( 'hook' => PurchaseDates::HOOK, 'status' => \ActionScheduler_Store::STATUS_PENDING ), 'ids' ) );
+		as_unschedule_all_actions( PurchaseDates::HOOK );
+		$batch = array();
+		for ( $i = 0; $i < PurchaseDates::BATCH; $i++ ) {
+			$c = $this->seed( $this->fx['p4'] );
+			add_comment_meta( $c, '_ndvr_order_id', $late );
+			add_comment_meta( $c, '_ndvr_verified', 1 );
+			$batch[] = $c;
+		}
+		update_option( PurchaseDates::CURSOR_OPTION, $batch[0] - 1, false );
+		$s->backfill( 0 );
+		$next = as_has_scheduled_action( PurchaseDates::HOOK, array( end( $batch ) ), 'ndv-reviews' );
+		as_unschedule_all_actions( PurchaseDates::HOOK );
+		update_option( PurchaseDates::DONE_OPTION, 1, true );
+		$this->ok( ! $on_ajax && 1 === $queued && $next, 'T5: the backfill is not queued on AJAX, is queued once on an admin load (twice called), and a full batch queues the next with its last id' );
+
+		// T7: whole days in GMT, whatever the site time zone.
+		$tz = get_option( 'timezone_string' );
+		update_option( 'timezone_string', 'Asia/Karachi' );
+		$text = Ownership::text(
+			array(
+				'verified'     => true,
+				'purchased_at' => '2026-01-01 20:00:00',
+				'date_gmt'     => gmdate( 'Y-m-d H:i:s', strtotime( '2026-01-01 20:00:00 UTC' ) + 13 * DAY_IN_SECONDS + 22 * HOUR_IN_SECONDS ),
+			)
+		);
+		update_option( 'timezone_string', $tz );
+		$this->ok( 'Reviewed 13 days after purchase' === $text, 'T7: 13 days 22 hours reads "13 days" with a +05:00 site time zone' );
+
+		// T8: only the newest orders are checked, newest first.
+		$u2 = $this->user();
+		$this->order( array( $this->fx['p1'] ), time() - 10 * DAY_IN_SECONDS, array( 'customer_id' => $u2 ) );
+		$this->order( array( $this->fx['p2'] ), time() - 2 * DAY_IN_SECONDS, array( 'customer_id' => $u2 ) );
+		$one = static function () {
+			return 1;
+		};
+		add_filter( 'ndv-reviews/purchase_date_order_limit', $one );
+		$limited = $s->lookup( array( 'product_id' => $this->fx['p1'], 'user_id' => $u2 ) );
+		remove_filter( 'ndv-reviews/purchase_date_order_limit', $one );
+		$full = $s->lookup( array( 'product_id' => $this->fx['p1'], 'user_id' => $u2 ) );
+		$this->ok( '' === $limited && '' !== $full, 'T8: with the limit at 1 only the newest order is checked; with the default the older matching one is found' );
+	}
+
+	/**
+	 * A plain review comment.
+	 *
+	 * @param int      $product Product.
+	 * @param int|null $when    Unix time (now by default).
+	 * @return int
+	 */
+	private function seed( $product, $when = null ) {
+		$when                   = null === $when ? time() : (int) $when;
+		$id                     = (int) wp_insert_comment(
+			array(
+				'comment_post_ID'  => $product,
+				'comment_type'     => 'review',
+				'comment_content'  => 'Seeded review for RR-23.',
+				'comment_approved' => 1,
+				'comment_date'     => get_date_from_gmt( gmdate( 'Y-m-d H:i:s', $when ) ),
+				'comment_date_gmt' => gmdate( 'Y-m-d H:i:s', $when ),
+			)
+		);
+		$this->fx['comments'][] = $id;
+
+		return $id;
+	}
 	// --------------------------------------------------------------- helpers
 
 	/**
