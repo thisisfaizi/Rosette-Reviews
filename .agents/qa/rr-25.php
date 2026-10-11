@@ -88,6 +88,7 @@ final class NDVR_QA_RR25 {
 			$this->ac8();
 			$this->ac9();
 			$this->settings_card();
+			$this->review_fixes();
 		} catch ( \Throwable $e ) {
 			$this->ok( false, 'uncaught ' . get_class( $e ) . ': ' . $e->getMessage() . ' @ ' . basename( $e->getFile() ) . ':' . $e->getLine() );
 		}
@@ -427,6 +428,119 @@ final class NDVR_QA_RR25 {
 		$this->ok( 3 === count( array_intersect( array( 'schema_gtin_meta', 'schema_mpn_meta', 'schema_brand_source' ), $mk[1] ) ) && '_gtinscript' === $saved['schema_gtin_meta'] && 'mympnkey' === $saved['schema_mpn_meta'] && 'auto' === $saved['schema_brand_source'] && false !== strpos( $html, 'list="ndvr-gtin-keys"' ), 'Settings: the three fields are on the SEO card with markers; meta keys keep only safe characters; an unknown brand source falls back to automatic' );
 	}
 
+	/**
+	 * Code review RR-25 (M1, M2, m1–m4, m7, T): pools, brand precedence,
+	 * entities, other GTIN keys, array meta, all-zero GTINs, the filter's
+	 * reach, a variation's parent brand, several brand terms.
+	 *
+	 * @return void
+	 */
+	private function review_fixes() {
+		$j = $this->j();
+
+		// M1: a pooled product's page describes itself, with the pool's rating.
+		$this->set(
+			array(
+				'schema_gtin_meta' => '_gtin',
+				'schema_mpn_meta'  => '_mpn',
+			)
+		);
+		$master = $this->product(
+			'RR25 Pool master',
+			array(
+				'meta' => array(
+					'_gtin' => '96385074',
+					'_mpn'  => 'MASTER-1',
+				),
+			)
+		);
+		$child  = $this->product(
+			'RR25 Pool child',
+			array(
+				'meta' => array(
+					'_gtin' => '4006381333931',
+					'_mpn'  => 'CHILD-1',
+				),
+			)
+		);
+		$this->rate( $master );
+		$groups = get_option( 'ndv_reviews_pro_groups', null );
+		update_option( 'ndv_reviews_pro_groups', array( $child => $master ) );
+		$pooled = \NdvReviews\Reviews\Pool::resolve_id( $child ) === $master;
+		$node   = $pooled ? $this->standalone( $child ) : null;
+		if ( null === $groups ) {
+			delete_option( 'ndv_reviews_pro_groups' );
+		} else {
+			update_option( 'ndv_reviews_pro_groups', $groups );
+		}
+		if ( $pooled ) {
+			$this->ok( is_array( $node ) && 'RR25 Pool child' === ( $node['name'] ?? '' ) && '4006381333931' === ( $node['gtin'] ?? '' ) && 'CHILD-1' === ( $node['mpn'] ?? '' ) && isset( $node['aggregateRating'] ), 'M1: on a pooled product\'s page the standalone node names that product and carries its identifiers, with the pool\'s rating' );
+		} else {
+			$this->line( 'SKIP: M1 needs Pro product groups' );
+		}
+
+		// m2 + m7: another GTIN key counts as a GTIN; the filter reaches only our keys.
+		$p    = wc_get_product( $child );
+		$add  = $j->identifiers_for( $p, array( 'gtin13' => '4006381333931' ), 'woo' );
+		$wide = static function ( $a ) {
+			$a['name'] = 'Hijacked';
+			$a['gtin'] = '96385074';
+			return $a;
+		};
+		add_filter( 'ndv-reviews/schema_identifiers', $wide );
+		$filtered = $j->identifiers_for( $p, array( 'gtin12' => '036000291452' ), 'woo' );
+		remove_filter( 'ndv-reviews/schema_identifiers', $wide );
+		$this->ok( ! isset( $add['gtin'] ) && ! isset( $filtered['name'] ) && ! isset( $filtered['gtin'] ) && 'CHILD-1' === ( $filtered['mpn'] ?? '' ), 'm2/m7: a node with gtin13 or gtin12 gets no second GTIN, even through the filter, which can\'t add other keys' );
+
+		// m3 + m4: an array in the meta, and an all-zero GTIN, add nothing (and warn nothing).
+		$arr  = $this->product( 'RR25 Array meta', array( 'meta' => array( '_gtin' => array( '4006381333931' ), '_mpn' => array( 'x' ) ) ) );
+		$zero = $this->product( 'RR25 Zero', array( 'meta' => array( '_gtin' => '00000000' ) ) );
+		$log  = (string) @file_get_contents( WP_CONTENT_DIR . '/debug.log' ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		$a    = $j->identifiers_for( wc_get_product( $arr ), array(), 'woo' );
+		$z    = $j->identifiers_for( wc_get_product( $zero ), array(), 'woo' );
+		$new  = substr( (string) @file_get_contents( WP_CONTENT_DIR . '/debug.log' ), strlen( $log ) ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		$this->ok( ! isset( $a['gtin'] ) && ! isset( $a['mpn'] ) && ! isset( $z['gtin'] ) && false === strpos( $new, 'Array to string' ) && ! JsonLd::valid_gtin( '00000000' ), 'm3/m4: an array stored in the field adds nothing and warns nothing; an all-zero GTIN is refused' );
+		$this->set(
+			array(
+				'schema_gtin_meta' => '',
+				'schema_mpn_meta'  => '',
+			)
+		);
+
+		// M2 + m1 + T: brand precedence, entities, several terms, a variation's parent.
+		$this->set( array( 'schema_brand_source' => 'pa_rr25brand' ) );
+		$terms = array( 'pa_rr25brand' => array( 'Zeta', 'Ben & Jerry\'s' ) );
+		if ( taxonomy_exists( 'product_brand' ) ) {
+			$both = $this->product(
+				'RR25 Standalone brands',
+				array(
+					'terms' => array(
+						'pa_rr25brand'  => 'Fernhill',
+						'product_brand' => 'RR25 Woo Brand',
+					),
+				)
+			);
+			$this->rate( $both );
+			$node = $this->standalone( $both );
+			$this->ok( 'RR25 Woo Brand' === ( $node['brand']['name'] ?? '' ), 'M2: on the standalone node WooCommerce Brands wins over the chosen attribute, as on WooCommerce\'s node' );
+		}
+		$multi = $this->product( 'RR25 Two brands', array( 'terms' => $terms ) );
+		$b     = $j->identifiers_for( wc_get_product( $multi ), array(), 'woo' );
+		$var   = new \WC_Product_Variable();
+		$var->set_name( 'RR25 Variable' );
+		$var->set_status( 'publish' );
+		$vp = (int) $var->save();
+		wp_set_object_terms( $vp, 'Fernhill', 'pa_rr25brand' );
+		$variation = new \WC_Product_Variation();
+		$variation->set_parent_id( $vp );
+		$variation->set_regular_price( '10' );
+		$vid                    = (int) $variation->save();
+		$this->fx['products'][] = $vid;
+		$this->fx['products'][] = $vp;
+		$vb                     = $j->identifiers_for( wc_get_product( $vid ), array(), 'woo' );
+		$this->set( array( 'schema_brand_source' => 'auto' ) );
+		$this->ok( 'Ben & Jerry\'s' === ( $b['brand']['name'] ?? '' ) && 'Fernhill' === ( $vb['brand']['name'] ?? '' ), 'm1/T: of several brand terms the first alphabetically is used, entities decoded ("Ben & Jerry\'s"); a variation takes its parent\'s brand' );
+	}
 	// --------------------------------------------------------------- helpers
 
 	/**

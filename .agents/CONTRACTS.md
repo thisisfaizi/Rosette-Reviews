@@ -408,3 +408,4 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   static `valid_gtin( $digits )` (8/12/13/14 + GS1 check digit), `brand_sources()`, `sanitize_brand_source()`;
   `add_identifiers()` on `woocommerce_structured_data_product` at 30. Filter `schema_identifiers( $add, $product, $markup,
   $context )`. Settings (card `seo`): `schema_gtin_meta` (''), `schema_mpn_meta` (''), `schema_brand_source` ('auto').
+  Rev 5: the filter can only add gtin/mpn/brand; gtin8–14 count as a GTIN; the standalone node describes the queried product.

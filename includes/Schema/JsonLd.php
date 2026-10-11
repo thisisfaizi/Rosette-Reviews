@@ -219,8 +219,10 @@ class JsonLd implements Registerable {
 			return;
 		}
 
+		// Ratings come from the review pool; the name, address and identifiers
+		// are the page's own product (a pooled product isn't its pool master).
 		$product_id = \NdvReviews\Reviews\Pool::resolve_id( get_queried_object_id() );
-		$product    = function_exists( 'wc_get_product' ) ? wc_get_product( $product_id ) : null;
+		$product    = function_exists( 'wc_get_product' ) ? wc_get_product( get_queried_object_id() ) : null;
 		if ( ! $product ) {
 			return;
 		}
@@ -353,9 +355,9 @@ class JsonLd implements Registerable {
 	public function render_gtin_field( $value ) {
 		?>
 		<div class="ndvr-field" style="margin-top:14px;">
-			<p class="description"><?php esc_html_e( 'Product identifiers are added only when WooCommerce or your SEO plugin hasn\'t already set them. Nothing is overwritten.', 'rosette-reviews' ); ?></p>
+			<p class="description" id="ndvr-schema-ids-intro"><?php esc_html_e( 'Product identifiers are added only when WooCommerce or your SEO plugin hasn\'t already set them. Nothing is overwritten.', 'rosette-reviews' ); ?></p>
 			<label for="ndvr-schema-gtin-meta"><?php esc_html_e( 'GTIN from a custom field', 'rosette-reviews' ); ?></label>
-			<input type="text" id="ndvr-schema-gtin-meta" name="schema_gtin_meta" class="regular-text" list="ndvr-gtin-keys" value="<?php echo esc_attr( (string) $value ); ?>" aria-describedby="ndvr-schema-gtin-help" />
+			<input type="text" id="ndvr-schema-gtin-meta" name="schema_gtin_meta" class="regular-text" list="ndvr-gtin-keys" value="<?php echo esc_attr( (string) $value ); ?>" aria-describedby="ndvr-schema-ids-intro ndvr-schema-gtin-help" />
 			<datalist id="ndvr-gtin-keys">
 				<?php foreach ( array( '_gtin', '_wpm_gtin_code', 'hwp_product_gtin', '_alg_ean', '_ts_gtin' ) as $key ) : ?>
 					<option value="<?php echo esc_attr( $key ); ?>"></option>
@@ -376,7 +378,7 @@ class JsonLd implements Registerable {
 		?>
 		<div class="ndvr-field">
 			<label for="ndvr-schema-mpn-meta"><?php esc_html_e( 'MPN from a custom field', 'rosette-reviews' ); ?></label>
-			<input type="text" id="ndvr-schema-mpn-meta" name="schema_mpn_meta" class="regular-text" value="<?php echo esc_attr( (string) $value ); ?>" aria-describedby="ndvr-schema-mpn-help" />
+			<input type="text" id="ndvr-schema-mpn-meta" name="schema_mpn_meta" class="regular-text" value="<?php echo esc_attr( (string) $value ); ?>" aria-describedby="ndvr-schema-ids-intro ndvr-schema-mpn-help" />
 			<p class="description" id="ndvr-schema-mpn-help"><?php esc_html_e( 'The product meta key that holds the manufacturer part number. Leave empty to turn this off.', 'rosette-reviews' ); ?></p>
 		</div>
 		<?php
@@ -393,7 +395,7 @@ class JsonLd implements Registerable {
 		?>
 		<div class="ndvr-field">
 			<label for="ndvr-schema-brand-source"><?php esc_html_e( 'Brand from', 'rosette-reviews' ); ?></label>
-			<select id="ndvr-schema-brand-source" name="schema_brand_source" style="max-width:340px;">
+			<select id="ndvr-schema-brand-source" name="schema_brand_source" style="max-width:340px;" aria-describedby="ndvr-schema-ids-intro">
 				<?php foreach ( self::brand_sources() as $slug => $label ) : ?>
 					<option value="<?php echo esc_attr( $slug ); ?>" <?php selected( $value, $slug ); ?>><?php echo esc_html( $label ); ?></option>
 				<?php endforeach; ?>
@@ -439,14 +441,16 @@ class JsonLd implements Registerable {
 		$variation = ! $standalone && array_key_exists( 'inProductGroupWithID', $markup );
 		$id        = (int) $product->get_id();
 
-		if ( ! $variation && ! array_key_exists( 'gtin', $markup ) ) {
+		$has_gtin = (bool) array_intersect_key( $markup, array_flip( array( 'gtin', 'gtin8', 'gtin12', 'gtin13', 'gtin14' ) ) );
+		if ( ! $variation && ! $has_gtin ) {
 			$candidates = array();
 			if ( $standalone && method_exists( $product, 'get_global_unique_id' ) ) {
 				$candidates[] = (string) $product->get_global_unique_id();
 			}
 			$gtin_key = (string) $this->settings->get( 'schema_gtin_meta', '' );
 			if ( '' !== $gtin_key ) {
-				$candidates[] = (string) get_post_meta( $id, $gtin_key, true );
+				$stored       = get_post_meta( $id, $gtin_key, true );
+				$candidates[] = is_scalar( $stored ) ? (string) $stored : '';
 			}
 			foreach ( $candidates as $raw ) {
 				$digits = (string) preg_replace( '/\D/', '', $raw );
@@ -459,25 +463,34 @@ class JsonLd implements Registerable {
 
 		$mpn_key = (string) $this->settings->get( 'schema_mpn_meta', '' );
 		if ( ! $variation && '' !== $mpn_key && ! array_key_exists( 'mpn', $markup ) ) {
-			$mpn = mb_substr( trim( wp_strip_all_tags( (string) get_post_meta( $id, $mpn_key, true ) ) ), 0, 70 );
+			$stored = get_post_meta( $id, $mpn_key, true );
+			$mpn    = is_scalar( $stored ) ? mb_substr( trim( wp_strip_all_tags( (string) $stored ) ), 0, 70 ) : '';
 			if ( '' !== $mpn ) {
 				$add['mpn'] = $mpn;
 			}
 		}
 
 		if ( ! array_key_exists( 'brand', $markup ) ) {
-			$source = self::sanitize_brand_source( $this->settings->get( 'schema_brand_source', 'auto' ) );
-			// On WooCommerce's node, WooCommerce Brands adds its own brand (priority 20).
-			$taxonomy = 'auto' === $source ? ( $standalone && taxonomy_exists( 'product_brand' ) ? 'product_brand' : '' ) : $source;
-			if ( '' !== $taxonomy && function_exists( 'wc_get_product_terms' ) ) {
-				$parent = $product->get_parent_id() ? (int) $product->get_parent_id() : $id;
-				$names  = (array) wc_get_product_terms( $parent, $taxonomy, array( 'fields' => 'names' ) );
-				$name   = $names ? trim( wp_strip_all_tags( (string) reset( $names ) ) ) : '';
+			$source = (string) $this->settings->get( 'schema_brand_source', 'auto' );
+			$source = 'auto' === $source || taxonomy_exists( $source ) ? $source : 'auto';
+			// WooCommerce Brands comes first, as on WooCommerce's node (where it
+			// adds its own brand at priority 20); then the chosen source.
+			$sources = array();
+			if ( $standalone && taxonomy_exists( 'product_brand' ) ) {
+				$sources[] = 'product_brand';
+			}
+			if ( 'auto' !== $source ) {
+				$sources[] = $source;
+			}
+			$parent = $product->get_parent_id() ? (int) $product->get_parent_id() : $id;
+			foreach ( $sources as $taxonomy ) {
+				$name = self::first_term_name( $parent, $taxonomy );
 				if ( '' !== $name ) {
 					$add['brand'] = array(
 						'@type' => 'Brand',
 						'name'  => $name,
 					);
+					break;
 				}
 			}
 		}
@@ -492,8 +505,36 @@ class JsonLd implements Registerable {
 		 * @param string              $context woo|standalone.
 		 */
 		$add = (array) apply_filters( 'ndv-reviews/schema_identifiers', $add, $product, $markup, $context );
+		$add = array_intersect_key( $add, array_flip( array( 'gtin', 'mpn', 'brand' ) ) );
+		if ( isset( $add['gtin'] ) && $has_gtin ) {
+			unset( $add['gtin'] );
+		}
 
 		return array_diff_key( $add, $markup );
+	}
+
+	/**
+	 * The first term name of a product in a taxonomy (alphabetical, so the
+	 * same brand shows every time), as plain text.
+	 *
+	 * @param int    $product_id Product.
+	 * @param string $taxonomy   Taxonomy.
+	 * @return string
+	 */
+	private static function first_term_name( $product_id, $taxonomy ) {
+		$terms = get_the_terms( $product_id, $taxonomy );
+		if ( ! is_array( $terms ) || ! $terms ) {
+			return '';
+		}
+		$names = array_map(
+			static function ( $term ) {
+				return trim( wp_strip_all_tags( wp_specialchars_decode( (string) $term->name, ENT_QUOTES ) ) );
+			},
+			$terms
+		);
+		sort( $names, SORT_NATURAL | SORT_FLAG_CASE );
+
+		return (string) reset( $names );
 	}
 
 	/**
@@ -504,7 +545,7 @@ class JsonLd implements Registerable {
 	 */
 	public static function valid_gtin( $digits ) {
 		$digits = (string) $digits;
-		if ( ! preg_match( '/^(\d{8}|\d{12,14})$/', $digits ) ) {
+		if ( ! preg_match( '/^(\d{8}|\d{12,14})$/', $digits ) || '' === ltrim( $digits, '0' ) ) {
 			return false;
 		}
 		$sum  = 0;

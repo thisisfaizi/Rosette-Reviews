@@ -1,8 +1,17 @@
 # RR-25: GTIN, MPN and brand in product structured data (only what WooCommerce leaves out)
 
-Status: built (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **16** (rev 4) (RR-00 F3b; planned build order, final at merge)
+Status: built (rev 5) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **16** (rev 4) (RR-00 F3b; planned build order, final at merge)
 
 Round 2: passed; rev 3 only adds the `NDVR_API` level for the Pro-facing method.
+
+Rev 5 (code review `reviews/code-RR-25.md` applied):
+- **Pooled products (M1):** the standalone node names, links and identifies the page's own product; only the rating comes from the review pool (with Pro product groups a member page no longer carries its master's GTIN, MPN or brand).
+- **Brand precedence (M2, m1, m5, m10):** on the standalone node WooCommerce Brands comes first, then the chosen source, as on WooCommerce's node; names are plain text (entities decoded); terms are read with `get_the_terms()` (cached) and the first name alphabetically is used; the front end checks the source with `taxonomy_exists()` instead of building the settings list.
+- **GTIN (m2, m3, m4):** any of `gtin`, `gtin8`, `gtin12`, `gtin13`, `gtin14` counts as an existing GTIN (also against the filter); an array stored in a meta field is ignored without a warning; an all-zero GTIN is refused.
+- **Filter (m7):** `schema_identifiers` can only add `gtin`, `mpn` and `brand`.
+- **Accessibility (m9):** the intro text describes all three fields (`aria-describedby`).
+- **Not changed:** m6 (`ndv-reviews/json_ld` runs before identifiers on WooCommerce's node, because WooCommerce Brands is also at 20; developers who need the final node use `woocommerce_structured_data_product` at 31+), m8 (the meta-key field keeps only safe characters, as the help says).
+- **Tests:** rr-25.php 18/18 (adds the pooled page, brand precedence, entities and several terms, a variation's parent brand, other GTIN keys, array meta, an all-zero GTIN, the filter's reach); fix mutations 8/9 killed, the survivor equivalent (WordPress already returns terms by name).
 
 Rev 4 (reconciled with the code after RR-11 to RR-24, before building):
 - **API level:** RR-20 to RR-24 took 11 to 15, so this feature raises `NDVR_API` to **16** (every "14" in §5/§6 means 16).

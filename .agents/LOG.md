@@ -1004,3 +1004,9 @@ EVIDENCE: rr-25 13/13; mutations 11/11 killed. RR-25P-1 (Pro feed identifiers) o
   priming, catalog-scoped recent rating/replies, once-per-request marking plus approved inserts, change-during-job,
   copy and sanitizing (m1, m2, m4–m12). m3 (group members in Coverage) deferred to RR-19. PRD rev 5.
 EVIDENCE: rr-24 22/22; fix mutations 9/9 killed (refund case needs a partial refund: a full one is already excluded by its status). Pro: Pooling skips loading non-variations (m9).
+
+## 2026-10-11 — RR-25 code review fixed → done
+- Review `prd/reviews/code-RR-25.md` (0 B, 2 M, 10 m, 12 T): pooled pages describe themselves (M1); WooCommerce Brands first
+  on both paths (M2); entities, gtin8–14, array meta, all-zero GTIN, filter reach, cached terms, aria (m1–m5, m7, m9, m10).
+  m6/m8 kept as documented. PRD rev 5.
+EVIDENCE: rr-25 18/18; fix mutations 8/9 killed (1 equivalent).
