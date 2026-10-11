@@ -277,6 +277,19 @@ class ReviewRepository {
 		if ( $is_verified ) {
 			update_comment_meta( $comment_id, 'verified', 1 );
 		}
+		// RR-23: the purchase date behind a verified review, before review_created.
+		\NdvReviews\Plugin::instance()->container()->get( 'purchase_dates' )->record(
+			$comment_id,
+			array(
+				'product_id' => $product_id,
+				'pool_id'    => $pool_id,
+				'user_id'    => $user_id,
+				'email'      => $email,
+				'source'     => $source,
+				'order_id'   => isset( $data['order_id'] ) ? absint( $data['order_id'] ) : 0,
+				'verified'   => $is_verified,
+			)
+		);
 		if ( null !== $risk ) {
 			$integrity->save( $comment_id, $risk, $risk_held );
 		}

@@ -958,3 +958,9 @@ EVIDENCE: rr-21 50/50 (T1–T11 added); Pro rr-14p 4/4 (T12); mutations 27/27 ki
   higher threshold covers still gets an alert.
 - Invitations ship hidden (`Recovery::INVITES_SIGNED_OFF` false) until owner check OC-13 (legal sign-off).
 EVIDENCE: rr-22 43/43; Pro rr-22p 3/3; mutations 23/24 killed (1 equivalent: send_invite() re-checks invited meta).
+
+## 2026-10-11 — RR-23 "Reviewed N weeks after purchase" built → in_review
+- PRD rev 4 reconciled (NDVR_API 14; lookup in create() after the verified meta; magic_link means an order or customer
+  token; trusted email only from a proven mailbox; done flag autoload yes; Elementor part built, RR-23P-2 not needed).
+- Pro RR-23P-1: Elementor "Review Date" part prints the label (switch, on) at free_api( 14 ).
+EVIDENCE: rr-23 14/14; mutations 21/23 killed (2 equivalent, see PRD rev 4); owner check OC-14 (Elementor).

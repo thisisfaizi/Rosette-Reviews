@@ -96,6 +96,8 @@ Free:
   account, disposable email, links, unverified); never the rating; Risk column, High risk view, hold before auto-approve.
 - Low-rating follow-up: email alert at or below 1–3 stars (one alert with Pro's), support contact shown after a low
   rating, private cases with a note and an Open cases view on any review; publishing is never affected.
+- "Reviewed 3 weeks after purchase" on verified reviews (from the reviewer's own paid order; one-time background
+  backfill; setting to hide it).
 - Review search in the reviews tab (products with 10+ reviews): text and titles only, highlighted, announced, with filters,
   works without JS.
 

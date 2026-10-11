@@ -385,3 +385,10 @@ Pro: `ndvr_qa`, `ndvr_admin_reply`, `ndvr_external`, `ndvr_qa_admin`.
   `recovery_resolve`, `recovery_reopen`, `recovery_invite`. Option prefix `ndv_reviews_invite_lock_`, transient prefix
   `ndvr_edit_saved_`. Transparency key `recovery`, fact `edit_invites`. Pro RR-22P-1: `Moderation\Plus::alert_handled()`
   is true only while Pro's low-rating alert is on and the rating is within its threshold.
+- RR-23 (NDVR_API 14): service `purchase_dates` = `Reviews\PurchaseDates` (`record()`, `lookup()`, `backfill()`); static
+  `Display\Ownership::text( $review )`, `label( $days )`, `days_between( $from_gmt, $to_gmt )`, `render()` on
+  `review_meta_after` (5). Comment meta `_ndvr_purchased_at` (GMT). View keys `date_gmt`, `purchased_at`. Filters
+  `show_ownership_time( $show, $review )`, `ownership_time_text( $text, $review, $seconds )`, `purchase_date_order_limit` (20).
+  Setting `ownership_time` (true). AS hook `ndvr_backfill_purchase_dates` (arg: last id); options
+  `ndv_reviews_backfill_purchase_done` (autoload yes), `ndv_reviews_backfill_purchase_cursor`. CSS `.ndvr-ownership`.
+  Pro RR-23P-1: Elementor "Review Date" part switch `ownership` (on) at `free_api( 14 )`.

@@ -162,8 +162,8 @@ class Privacy implements Registerable {
 		$media    = Db::table( 'review_media' );
 
 		foreach ( $comments as $comment ) {
-			$id     = (int) $comment->comment_ID;
-			$fields = array(
+			$id        = (int) $comment->comment_ID;
+			$fields    = array(
 				array(
 					'name'  => __( 'Product', 'rosette-reviews' ),
 					'value' => get_the_title( $comment->comment_post_ID ),
@@ -190,6 +190,13 @@ class Privacy implements Registerable {
 					'value' => $comment->comment_date,
 				),
 			);
+			$purchased = (string) get_comment_meta( $id, '_ndvr_purchased_at', true );
+			if ( '' !== $purchased ) {
+				$fields[] = array(
+					'name'  => __( 'Purchase date used for this review', 'rosette-reviews' ),
+					'value' => get_date_from_gmt( $purchased ),
+				);
+			}
 
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table names from Db::table(), value placeholdered.
 			$scores = $wpdb->get_results( $wpdb->prepare( "SELECT c.name, rc.rating FROM `{$rc_table}` rc INNER JOIN `{$cr_table}` c ON c.id = rc.criteria_id WHERE rc.comment_id = %d", $id ) );
@@ -467,8 +474,8 @@ class Privacy implements Registerable {
 			delete_comment_meta( $id, '_ndvr_title' );
 			delete_comment_meta( $id, '_ndvr_order_id' );
 			delete_comment_meta( $id, '_ndvr_answers' );
-			foreach ( array( '_ndvr_risk', '_ndvr_risk_reasons', '_ndvr_risk_held', '_ndvr_token_id', '_ndvr_recovery_status', '_ndvr_recovery_note', '_ndvr_recovery_resolved_at', '_ndvr_recovery_invited_at' ) as $extra_key ) {
-				delete_comment_meta( $id, $extra_key ); // RR-21, RR-22.
+			foreach ( array( '_ndvr_risk', '_ndvr_risk_reasons', '_ndvr_risk_held', '_ndvr_token_id', '_ndvr_recovery_status', '_ndvr_recovery_note', '_ndvr_recovery_resolved_at', '_ndvr_recovery_invited_at', '_ndvr_purchased_at' ) as $extra_key ) {
+				delete_comment_meta( $id, $extra_key ); // RR-21, RR-22, RR-23.
 			}
 			$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->commentmeta} WHERE comment_id = %d AND meta_key LIKE %s", $id, $wpdb->esc_like( '_ndvr_ans_' ) . '%' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			wp_cache_delete( $id, 'comment_meta' );

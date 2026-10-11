@@ -1,8 +1,20 @@
 # RR-23: "Reviewed N weeks after purchase"
 
-Status: prd-ok (rev 3) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **12** (RR-00 F3b; planned build order, final at merge) · **Innovation:** no competitor shows ownership time on a review.
+Status: built (rev 4) · Plan: F · Inherits PRD-00 + RR-00 · No schema change · Raises `NDVR_API` to **14** (rev 4) (RR-00 F3b; planned build order, final at merge) · **Innovation:** no competitor shows ownership time on a review.
 
 Round 2: passed; rev 3 only adds the `NDVR_API` level for the Pro-facing helper.
+
+Rev 4 (reconciled with the code after RR-11 to RR-22, before building):
+- **API level:** RR-20 took 11, RR-21 12 and RR-22 13, so this feature raises `NDVR_API` to **14** (every "12" in §5/§6 means 14).
+- **Where the lookup runs:** in `ReviewRepository::create()` right after `_ndvr_verified` is written (ReviewRepository.php:276) and before `review_created`, through a new service `purchase_dates` (`Reviews\PurchaseDates`). `$is_verified` is now computed before the insert (RR-21), so the lookup reuses it.
+- **Which reviews:** interactive sources only, and only when `create()` already knows the reviewer bought it: `$is_verified`, or source `magic_link` (only order and customer tokens use that source; Landing marks them verified after `create()` returns, Landing.php:441-445). A verified `list_link` review (the list token proves the mailbox, and `is_verified()` matched that email) uses the billing-email query of rule 3 without the customer query.
+- **Rule 3 inputs:** a customer token passes `user_id` = the token's `customer_id` (Landing.php:420) and the token's email, so `create()` has both.
+- **Display:** a static `Display\Ownership::render( $review )` on `review_meta_after` (the hook ReviewEdits uses for "Edited", templates/review-item.php:94), printed before "Edited" (priority 5). `.ndvr-ownership` takes the `.ndvr-review-edited` colour without the italics.
+- **Setting:** `ownership_time` on the "Reviews and trust" card with its own render callback (a checkbox); `render_card_fields()` prints its marker.
+- **Backfill:** the done flag is `ndv_reviews_backfill_purchase_done` with autoload **yes** (it is read on every admin request; the cursor stays autoload no). Batches follow `ReviewFieldRepository::reindex_filter_keys()` (AS async action with the cursor as its argument, group `ndv-reviews`), so the cursor option is only a crash guard.
+- **Privacy:** the date joins the review's own export item ("Purchase date used for this review") and the eraser's fixed key list (the RR-21/RR-22 foreach in Privacy.php).
+- **As built:** `Reviews\PurchaseDates` (service `purchase_dates`: `record()`, `lookup()`, `backfill()`, `maybe_schedule()`) and `Display\Ownership` (`days_between()`, `label()`, `text()`, `render()`); the view model gains `date_gmt` and `purchased_at`. The paid date is used when set, else the created date. A signed-in reviewer's typed email is never used (only their account's orders). Tests: rr-23.php 14/14 (AC1–AC10, the typed-email case, an unpaid order token, an unverified review skipped by the backfill, the settings round trip); mutations 21/23 killed, 2 equivalent (`magic_link` in `record()`: order and customer tokens already pass `is_verified()` through the token email or account; `< 730.5` vs `< 731` on whole days). The Elementor part has no harness (no Elementor on the QA site): owner check OC-14.
+- **Pro:** RR-23P-1 (Elementor `DatePart`) is built with this feature: a "Show how long after purchase" switch (on) prints `Ownership::text()` after the date at `free_api( 14 )`. RR-23P-2 is not needed: free's `ownership_time` setting and the `show_ownership_time` filter cover the card.
 
 ## 1. Problem and who it's for
 "5★, love it" written the day a parcel arrives means less than the same review after two months of use, and shoppers can't tell the two apart. We know the order for verified reviews, so we can show "Reviewed 3 weeks after purchase", a cheap and honest trust signal. This is for any store with verified reviews, especially durable goods.

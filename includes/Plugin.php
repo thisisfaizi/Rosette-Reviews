@@ -265,6 +265,13 @@ final class Plugin {
 		);
 
 		$c->set(
+			'purchase_dates',
+			static function ( $c ) {
+				return new \NdvReviews\Reviews\PurchaseDates( $c->get( 'settings' ) );
+			}
+		);
+
+		$c->set(
 			'recovery',
 			static function ( $c ) {
 				return new \NdvReviews\Reviews\Recovery( $c->get( 'settings' ) );
@@ -586,6 +593,7 @@ final class Plugin {
 			$this->container->get( 'reports' ),
 			$this->container->get( 'integrity' ),
 			$this->container->get( 'recovery' ),
+			$this->container->get( 'purchase_dates' ),
 			$this->container->get( 'review_edits' ),
 			$this->container->get( 'myaccount_reviews' ),
 			$this->container->get( 'pending_edits' ),

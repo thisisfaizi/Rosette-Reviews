@@ -458,6 +458,9 @@ class ReviewQuery {
 			'id'               => $id,
 			'author'           => $author,
 			'date'             => $comment->comment_date,
+			// RR-23 (NDVR_API 14).
+			'date_gmt'         => $comment->comment_date_gmt,
+			'purchased_at'     => (string) get_comment_meta( $id, PurchaseDates::META, true ),
 			'content'          => $comment->comment_content,
 			'title'            => (string) get_comment_meta( $id, '_ndvr_title', true ),
 			'overall'          => (float) get_comment_meta( $id, '_ndvr_overall_rating', true ),
