@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       Rosette Reviews
- * Plugin URI:        https://nowdigiverse.com/rosette-reviews
+ * Plugin URI:        https://rosettereviews.com
  * Description:        Reliable, self-hosted reviews for WooCommerce — multi-criteria ratings, photo reviews, working reminders, and rich schema. No account or external service required.
  * Version:           1.0.0
  * Requires at least: 6.0
