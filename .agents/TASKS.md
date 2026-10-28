@@ -113,6 +113,11 @@ were empirically verified (not just code-reviewed) — noted per item.
 | — | **Known, accepted limitation (not fixed, documented rather than silently left)**: `Forms/AntiSpam.php`'s per-IP rate limiter is a non-atomic get-transient/set-transient read-then-write — concurrent parallel requests from the same IP could exceed the configured hourly ceiling. This is an explicitly *soft* anti-spam limit, not a data-integrity guarantee; a robust atomic fix would need a dedicated counter table (a real schema change) for a low-severity, low-likelihood gap. Deferred rather than rushed | — |
 | T-UI4 | UI polish: Trust Panel summary panel gets a subtle gold→verdant gradient accent bar (was a plain bordered box, visually interchangeable with any generic "modern SaaS" card); topic/filter/pagination pills gained a small hover lift (`translateY(-1px)`) instead of a flat color-only swap, consistent with the lift treatment already used on marquee cards and the new share-icon tooltip | `npm run build:assets`; live-verified in browser, 0 new console errors |
 
+## Docs — DONE (2026-10-29)
+| id | title | evidence |
+|---|---|---|
+| D-1 | GitHub README rebranded to Rosette Reviews (prose only; code/file names keep `ndv-reviews`), keyword H1 + intro, "How it compares" table, rosettereviews.com link; GPL-2.0 `LICENSE` added. `readme.txt` untouched | PR (docs/readme-seo); see LOG.md 2026-10-29 |
+
 ## Backlog — from PRODUCTION-PLAN.md (next)
 | id | title | owner | status | AC |
 |---|---|---|---|---|
