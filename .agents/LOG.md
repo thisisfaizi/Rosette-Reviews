@@ -459,7 +459,7 @@ Reminders, email preview, product page, Design preview verified in browser.
 NOT VERIFIED: Elementor runtime (not installed); real reCAPTCHA/AI/ESP/Google/Facebook network calls (mocked);
 opt-in uninstall run end-to-end (selection query verified only).
 
-## 2026-10-29 — D-1: GitHub README SEO + LICENSE (docs only)
+## 2026-10-29 — D-1: GitHub README SEO + LICENSE (docs only, PR #1)
 CHANGED: `README.md` only, plus a new `LICENSE` (full GPL-2.0 text from gnu.org; the README already said
 GPLv2 or later). README prose and headings now use the brand **Rosette Reviews** (rosettereviews.com) with a
 "formerly NDV Reviews" note. File, folder and code names (`ndv-reviews.php`, `ndv-reviews/`, `ndvr_`) are

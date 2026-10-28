@@ -116,7 +116,7 @@ were empirically verified (not just code-reviewed) — noted per item.
 ## Docs — DONE (2026-10-29)
 | id | title | evidence |
 |---|---|---|
-| D-1 | GitHub README rebranded to Rosette Reviews (prose only; code/file names keep `ndv-reviews`), keyword H1 + intro, "How it compares" table, rosettereviews.com link; GPL-2.0 `LICENSE` added. `readme.txt` untouched | PR (docs/readme-seo); see LOG.md 2026-10-29 |
+| D-1 | GitHub README rebranded to Rosette Reviews (prose only; code/file names keep `ndv-reviews`), keyword H1 + intro, "How it compares" table, rosettereviews.com link; GPL-2.0 `LICENSE` added. `readme.txt` untouched | PR #1 (docs/readme-seo), squash-merged 2026-10-29; see LOG.md 2026-10-29 |
 
 ## Backlog — from PRODUCTION-PLAN.md (next)
 | id | title | owner | status | AC |
