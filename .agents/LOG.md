@@ -458,3 +458,14 @@ OBSERVED: Plugin Check free dist 0 errors (was 13). All PHP lint clean, all JS `
 Reminders, email preview, product page, Design preview verified in browser.
 NOT VERIFIED: Elementor runtime (not installed); real reCAPTCHA/AI/ESP/Google/Facebook network calls (mocked);
 opt-in uninstall run end-to-end (selection query verified only).
+
+## 2026-10-29 — D-1: GitHub README SEO + LICENSE (docs only, PR #1)
+CHANGED: `README.md` only, plus a new `LICENSE` (full GPL-2.0 text from gnu.org; the README already said
+GPLv2 or later). README prose and headings now use the brand **Rosette Reviews** (rosettereviews.com) with a
+"formerly NDV Reviews" note. File, folder and code names (`ndv-reviews.php`, `ndv-reviews/`, `ndvr_`) are
+unchanged. Added a keyword H1/intro, a feature list taken from `readme.txt`, and a neutral "How it compares"
+table (Judge.me, CusRev) with a trademark line. External-calls wording matches `readme.txt`: none by
+default, optional reCAPTCHA v3.
+NOT CHANGED: `readme.txt`, code, versions, hooks, options.
+OBSERVED: docs-only diff (`git diff --stat`: README.md, LICENSE, .agents/). Lint workflow was already failing
+on `main` before this change (run 37832866189, 2026-10-08), so a red Lint check on this PR is pre-existing.
